@@ -1,6 +1,7 @@
 import { networkInterfaces } from "node:os";
 import { openDb, getAllMessages, getMessagesSince, insertMessage, insertMessages, ensureChannel, getChannels, generateId, type Message } from "./db";
 import { readConfig, readSyncCursor } from "./config";
+import webHtml from "../web/index.html" with { type: "text" };
 
 function getLocalIp(): string {
   const nets = networkInterfaces();
@@ -21,6 +22,13 @@ export function startServer(chatDir: string, port: number) {
     async fetch(req, server) {
       const url = new URL(req.url);
       const path = url.pathname;
+
+      // Web UI
+      if (path === "/" && req.method === "GET") {
+        return new Response(webHtml, {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
 
       // WebSocket upgrade
       if (path === "/ws") {
