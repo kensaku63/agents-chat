@@ -5,7 +5,7 @@ import { userInfo } from "node:os";
 import { findChatDir, requireChatDir, readConfig, writeConfig, type ChatConfig } from "./src/config";
 import { openDb, createChannel, getChannels, queryMessages, idToTime } from "./src/db";
 import { sync, sendToUpstream, connectRealtime } from "./src/sync";
-import { startServer, startTunnel } from "./src/server";
+import { startServer, startTunnel, startStandbyMode, syncFromBackups } from "./src/server";
 
 // --- Arg parsing ---
 
@@ -110,7 +110,7 @@ async function cmdJoin(args: string[]) {
     console.error(`Error: Cannot connect to ${upstream}`);
     process.exit(1);
   }
-  const info = await infoRes.json() as { name: string; owner: string };
+  const info = await infoRes.json() as { name: string; owner: string; backup_owners?: string[] };
 
   const targetDir = resolve(flags.dir as string || info.name);
   const chatDir = join(targetDir, ".chat");
@@ -127,6 +127,7 @@ async function cmdJoin(args: string[]) {
     name: info.name,
     identity,
     upstream,
+    ...(info.backup_owners && info.backup_owners.length > 0 ? { backup_owners: info.backup_owners } : {}),
     created_at: new Date().toISOString(),
   };
   writeConfig(chatDir, config);
@@ -147,7 +148,10 @@ async function cmdServe(args: string[]) {
   const { flags } = parseArgs(args);
   const port = parseInt(flags.port as string) || config.port || 4321;
 
-  if (config.upstream) {
+  if (flags.standby) {
+    // スタンバイモード: Primaryを監視し、落ちたら自動でサーバーを引き継ぐ
+    await startStandbyMode(chatDir, port);
+  } else if (config.upstream) {
     // Member: initial sync, then realtime WebSocket connection
     const result = await sync(chatDir);
     if (result.newMessages > 0 || result.newChannels > 0) {
@@ -156,6 +160,8 @@ async function cmdServe(args: string[]) {
     connectRealtime(chatDir);
     console.log(`Listening for messages from ${config.upstream}`);
   } else {
+    // Owner: バックアップから差分マージ後にサーバー起動
+    await syncFromBackups(chatDir);
     startServer(chatDir, port);
 
     if (flags.tunnel) {
@@ -393,6 +399,7 @@ Commands:
   init [name]                     Create a new chat (you become the owner)
   join <url>                      Join an existing chat
   serve [--port N]                Start server (owner) / realtime listener (member)
+    --standby                     Monitor primary; auto-takeover if it goes down
   sync                            Pull latest from upstream
 
   send <channel> <message>        Send a message
