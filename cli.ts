@@ -59,9 +59,8 @@ async function cmdInit(args: string[]) {
   const { positional, flags } = parseArgs(args);
   const name = positional[0] || basename(process.cwd());
   const identity = (flags.identity as string) || userInfo().username;
-  const targetDir = positional[0] ? resolve(positional[0]) : process.cwd();
 
-  const chatDir = join(targetDir, ".chat");
+  const chatDir = join(process.cwd(), ".chat");
   if (existsSync(chatDir)) {
     console.error(`Error: ${chatDir} already exists.`);
     process.exit(1);
@@ -87,9 +86,6 @@ async function cmdInit(args: string[]) {
   console.log(`  Role:      owner`);
   console.log("");
   console.log("Next steps:");
-  if (targetDir !== process.cwd()) {
-    console.log(`  cd ${positional[0]}`);
-  }
   console.log("  chat serve          # Start sharing");
   console.log("  chat send general 'Hello!'");
 }
@@ -112,8 +108,7 @@ async function cmdJoin(args: string[]) {
   }
   const info = await infoRes.json() as { name: string; owner: string };
 
-  const targetDir = resolve(flags.dir as string || info.name);
-  const chatDir = join(targetDir, ".chat");
+  const chatDir = join(process.cwd(), ".chat");
 
   if (existsSync(chatDir)) {
     console.error(`Error: ${chatDir} already exists.`);
