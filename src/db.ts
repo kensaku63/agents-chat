@@ -1,6 +1,5 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { mkdirSync, appendFileSync, writeFileSync } from "node:fs";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS channels (
@@ -44,7 +43,7 @@ export function openDb(chatDir: string): Database {
 }
 
 export function generateId(): string {
-  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return `msg_${crypto.randomUUID()}`;
 }
 
 export function insertMessage(db: Database, msg: Message): boolean {
@@ -115,37 +114,3 @@ export function ensureChannel(db: Database, name: string): void {
   db.run("INSERT OR IGNORE INTO channels (name) VALUES (?)", [name]);
 }
 
-// --- JSONL operations ---
-
-export function appendToJsonl(chatDir: string, msg: Message): void {
-  const dir = join(chatDir, "channels");
-  mkdirSync(dir, { recursive: true });
-  appendFileSync(join(dir, `${msg.channel}.jsonl`), JSON.stringify(msg) + "\n");
-}
-
-export function appendManyToJsonl(chatDir: string, msgs: Message[]): void {
-  if (msgs.length === 0) return;
-  const dir = join(chatDir, "channels");
-  mkdirSync(dir, { recursive: true });
-
-  const byChannel = new Map<string, string>();
-  for (const msg of msgs) {
-    const prev = byChannel.get(msg.channel) || "";
-    byChannel.set(msg.channel, prev + JSON.stringify(msg) + "\n");
-  }
-
-  for (const [channel, content] of byChannel) {
-    appendFileSync(join(dir, `${channel}.jsonl`), content);
-  }
-}
-
-export function rebuildJsonl(chatDir: string, db: Database): void {
-  const dir = join(chatDir, "channels");
-  mkdirSync(dir, { recursive: true });
-
-  for (const ch of getChannels(db)) {
-    const msgs = queryMessages(db, ch.name);
-    const content = msgs.map(m => JSON.stringify(m)).join("\n") + (msgs.length ? "\n" : "");
-    writeFileSync(join(dir, `${ch.name}.jsonl`), content);
-  }
-}

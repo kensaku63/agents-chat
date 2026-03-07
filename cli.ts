@@ -3,7 +3,7 @@ import { resolve, join, basename } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { findChatDir, requireChatDir, readConfig, writeConfig, type ChatConfig } from "./src/config";
-import { openDb, createChannel, getChannels, queryMessages, rebuildJsonl } from "./src/db";
+import { openDb, createChannel, getChannels, queryMessages } from "./src/db";
 import { sync, sendToUpstream } from "./src/sync";
 import { startServer } from "./src/server";
 
@@ -13,16 +13,18 @@ function parseArgs(args: string[]): { positional: string[]; flags: Record<string
   const positional: string[] = [];
   const flags: Record<string, string | boolean> = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--")) {
-      const key = args[i].slice(2);
-      if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-        flags[key] = args[i + 1];
+    const arg = args[i]!;
+    if (arg.startsWith("--")) {
+      const key = arg.slice(2);
+      const next = args[i + 1];
+      if (next && !next.startsWith("--")) {
+        flags[key] = next;
         i++;
       } else {
         flags[key] = true;
       }
     } else {
-      positional.push(args[i]);
+      positional.push(arg);
     }
   }
   return { positional, flags };
@@ -31,9 +33,10 @@ function parseArgs(args: string[]): { positional: string[]; flags: Record<string
 function parseSince(since: string): string {
   const match = since.match(/^(\d+)([mhd])$/);
   if (match) {
-    const [, num, unit] = match;
+    const num = match[1]!;
+    const unit = match[2]!;
     const ms: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
-    return new Date(Date.now() - parseInt(num) * ms[unit]).toISOString();
+    return new Date(Date.now() - parseInt(num) * ms[unit]!).toISOString();
   }
   return since;
 }
@@ -61,8 +64,6 @@ async function cmdInit(args: string[]) {
     process.exit(1);
   }
 
-  mkdirSync(join(chatDir, "channels"), { recursive: true });
-
   const config: ChatConfig = {
     role: "owner",
     name,
@@ -70,6 +71,7 @@ async function cmdInit(args: string[]) {
     port: 4321,
     created_at: new Date().toISOString(),
   };
+  mkdirSync(chatDir, { recursive: true });
   writeConfig(chatDir, config);
 
   const db = openDb(chatDir);
@@ -115,7 +117,7 @@ async function cmdJoin(args: string[]) {
     process.exit(1);
   }
 
-  mkdirSync(join(chatDir, "channels"), { recursive: true });
+  mkdirSync(chatDir, { recursive: true });
 
   const config: ChatConfig = {
     role: "member",
@@ -127,7 +129,6 @@ async function cmdJoin(args: string[]) {
   writeConfig(chatDir, config);
 
   // Initial sync
-  process.chdir(targetDir);
   const result = await sync(chatDir);
 
   console.log(`Joined: ${info.name} (owner: ${info.owner})`);
@@ -146,7 +147,7 @@ async function cmdServe(args: string[]) {
   startServer(chatDir, port);
 }
 
-async function cmdSync(_args: string[]) {
+async function cmdSync() {
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
 
@@ -303,16 +304,7 @@ async function cmdChannelCreate(args: string[]) {
   console.log(`Channel created: #${name}`);
 }
 
-async function cmdRebuild(_args: string[]) {
-  const chatDir = requireChatDir();
-  const db = openDb(chatDir);
-  rebuildJsonl(chatDir, db);
-  const channels = getChannels(db);
-  db.close();
-  console.log(`Rebuilt JSONL for ${channels.length} channels.`);
-}
-
-async function cmdStatus(_args: string[]) {
+async function cmdStatus() {
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
   const db = openDb(chatDir);
@@ -356,7 +348,6 @@ Commands:
   channels                        List channels
   channel:create <name> [desc]    Create a channel
   status                          Show chat info
-  rebuild                         Rebuild JSONL from SQLite
 
 Options:
   --identity <name>               Set your identity (default: OS username)
@@ -371,13 +362,12 @@ switch (cmd) {
   case "init":           await cmdInit(args); break;
   case "join":           await cmdJoin(args); break;
   case "serve":          await cmdServe(args); break;
-  case "sync":           await cmdSync(args); break;
+  case "sync":           await cmdSync(); break;
   case "send":           await cmdSend(args); break;
   case "read":           await cmdRead(args); break;
   case "channels":       await cmdChannels(args); break;
   case "channel:create": await cmdChannelCreate(args); break;
-  case "rebuild":        await cmdRebuild(args); break;
-  case "status":         await cmdStatus(args); break;
+  case "status":         await cmdStatus(); break;
   case "help": case "--help": case "-h": case undefined:
     showHelp(); break;
   default:

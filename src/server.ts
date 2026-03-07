@@ -1,5 +1,5 @@
 import { networkInterfaces } from "node:os";
-import { openDb, getAllMessages, getMessagesSince, insertMessage, ensureChannel, createChannel, getChannels, generateId, appendToJsonl, type Message } from "./db";
+import { openDb, getAllMessages, getMessagesSince, insertMessage, ensureChannel, getChannels, generateId, type Message } from "./db";
 import { readConfig } from "./config";
 
 function getLocalIp(): string {
@@ -46,8 +46,10 @@ export function startServer(chatDir: string, port: number) {
 
       // POST /api/channels
       if (path === "/api/channels" && req.method === "POST") {
-        const body = await req.json() as { name: string; description?: string };
-        createChannel(db, body.name, body.description || "");
+        let body: { name: string; description?: string };
+        try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
+        if (!body.name) return Response.json({ error: "name is required" }, { status: 400, headers });
+        ensureChannel(db, body.name);
         return Response.json({ ok: true }, { headers });
       }
 
@@ -62,14 +64,15 @@ export function startServer(chatDir: string, port: number) {
 
       // POST /api/messages
       if (path === "/api/messages" && req.method === "POST") {
-        const body = await req.json() as {
-          channel: string;
-          author: string;
-          author_type: "human" | "agent";
-          content: string;
-          reply_to?: string;
-          agent_context?: string;
-        };
+        let body: { channel: string; author: string; author_type: "human" | "agent"; content: string; reply_to?: string; agent_context?: string };
+        try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
+
+        if (!body.channel || !body.author || !body.content) {
+          return Response.json({ error: "channel, author, content are required" }, { status: 400, headers });
+        }
+        if (body.author_type && body.author_type !== "human" && body.author_type !== "agent") {
+          return Response.json({ error: "author_type must be 'human' or 'agent'" }, { status: 400, headers });
+        }
 
         const msg: Message = {
           id: generateId(),
@@ -84,7 +87,6 @@ export function startServer(chatDir: string, port: number) {
 
         ensureChannel(db, msg.channel);
         insertMessage(db, msg);
-        appendToJsonl(chatDir, msg);
 
         return Response.json({ ok: true, message: msg }, { headers });
       }
@@ -102,7 +104,7 @@ export function startServer(chatDir: string, port: number) {
   console.log(`  chat join http://${localIp}:${port}`);
   console.log("");
   console.log("For internet access:");
-  console.log(`  npx cloudflared tunnel --url http://localhost:${port}`);
+  console.log(`  bunx cloudflared tunnel --url http://localhost:${port}`);
 
   return server;
 }

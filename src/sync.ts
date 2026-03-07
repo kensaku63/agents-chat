@@ -1,4 +1,4 @@
-import { openDb, insertMessages, appendManyToJsonl, insertMessage, appendToJsonl, ensureChannel, createChannel, generateId, type Message } from "./db";
+import { openDb, insertMessages, insertMessage, ensureChannel, generateId, type Message } from "./db";
 import { readConfig, readSyncCursor, writeSyncCursor } from "./config";
 
 export async function sync(chatDir: string): Promise<{ newMessages: number; newChannels: number }> {
@@ -30,7 +30,6 @@ export async function sync(chatDir: string): Promise<{ newMessages: number; newC
 
   // Sync messages
   const inserted = insertMessages(db, data.messages);
-  appendManyToJsonl(chatDir, inserted);
 
   // Update cursor
   writeSyncCursor(chatDir, data.cursor);
@@ -64,7 +63,6 @@ export async function sendToUpstream(chatDir: string, channel: string, author: s
     const db = openDb(chatDir);
     ensureChannel(db, msg.channel);
     insertMessage(db, msg);
-    appendToJsonl(chatDir, msg);
     db.close();
 
     return msg;
@@ -84,7 +82,6 @@ export async function sendToUpstream(chatDir: string, channel: string, author: s
     const db = openDb(chatDir);
     ensureChannel(db, channel);
     insertMessage(db, msg);
-    appendToJsonl(chatDir, msg);
     db.close();
 
     return msg;
