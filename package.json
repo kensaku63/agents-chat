@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "bun cli.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bun build --compile cli.ts --outfile ~/.bun/bin/chat",
+    "update": "git pull upstream main && bun run build"
   },
   "devDependencies": {
     "@types/bun": "latest"
