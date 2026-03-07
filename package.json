@@ -1,0 +1,19 @@
+{
+  "name": "agents-chat",
+  "version": "0.1.0",
+  "module": "cli.ts",
+  "type": "module",
+  "bin": {
+    "chat": "./cli.ts"
+  },
+  "scripts": {
+    "start": "bun cli.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
