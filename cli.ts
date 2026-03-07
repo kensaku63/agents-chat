@@ -5,7 +5,7 @@ import { userInfo } from "node:os";
 import { findChatDir, requireChatDir, readConfig, writeConfig, type ChatConfig } from "./src/config";
 import { openDb, createChannel, getChannels, queryMessages, idToTime } from "./src/db";
 import { sync, sendToUpstream, connectRealtime } from "./src/sync";
-import { startServer } from "./src/server";
+import { startServer, startTunnel } from "./src/server";
 
 // --- Arg parsing ---
 
@@ -157,6 +157,14 @@ async function cmdServe(args: string[]) {
     console.log(`Listening for messages from ${config.upstream}`);
   } else {
     startServer(chatDir, port);
+
+    if (flags.tunnel) {
+      console.log("\nStarting tunnel...");
+      const tunnelUrl = await startTunnel(port);
+      console.log(`\n  Public: ${tunnelUrl}`);
+      console.log(`\n  Share with team:`);
+      console.log(`    chat join ${tunnelUrl}`);
+    }
   }
 }
 
@@ -307,6 +315,54 @@ async function cmdChannelCreate(args: string[]) {
   console.log(`Channel created: #${name}`);
 }
 
+async function cmdWatch(args: string[]) {
+  const chatDir = requireChatDir();
+  const config = readConfig(chatDir);
+  const { positional } = parseArgs(args);
+  const channelFilter = positional[0] || null;
+
+  const port = config.port || 4321;
+  const wsUrl = config.upstream
+    ? config.upstream.replace(/^http/, "ws") + "/ws"
+    : `ws://localhost:${port}/ws`;
+
+  console.log(`Watching${channelFilter ? ` #${channelFilter}` : ""} (${config.name})`);
+  console.log("Press Ctrl+C to stop.\n");
+
+  let ws: WebSocket;
+  let closed = false;
+
+  function connect() {
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {};
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data as string);
+        if (data.type === "msg") {
+          if (channelFilter && data.channel !== channelFilter) return;
+          const time = formatTime(data.id);
+          const replyTag = data.reply_to ? ` [reply:${data.reply_to.slice(-6)}]` : "";
+          console.log(`[${time}] #${data.channel} ${data.author}${replyTag}: ${data.content}`);
+        }
+      } catch {}
+    };
+
+    ws.onclose = () => {
+      if (!closed) {
+        setTimeout(connect, 3000);
+      }
+    };
+
+    ws.onerror = () => {};
+  }
+
+  connect();
+
+  await new Promise(() => {});
+}
+
 async function cmdStatus() {
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
@@ -348,6 +404,8 @@ Commands:
     --search <query>              Search messages
     --json                        Output as JSON
 
+  watch [channel]                  Watch messages in real-time
+
   channels                        List channels
   channel:create <name> [desc]    Create a channel
   status                          Show chat info
@@ -370,6 +428,7 @@ switch (cmd) {
   case "read":           await cmdRead(args); break;
   case "channels":       await cmdChannels(args); break;
   case "channel:create": await cmdChannelCreate(args); break;
+  case "watch":          await cmdWatch(args); break;
   case "status":         await cmdStatus(); break;
   case "help": case "--help": case "-h": case undefined:
     showHelp(); break;

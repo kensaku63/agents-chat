@@ -138,12 +138,32 @@ export function startServer(chatDir: string, port: number) {
   console.log(`Chat server started: ${config.name}`);
   console.log(`  Local:  http://localhost:${port}`);
   console.log(`  LAN:    http://${localIp}:${port}`);
-  console.log("");
-  console.log("Share with team:");
-  console.log(`  chat join http://${localIp}:${port}`);
-  console.log("");
-  console.log("For internet access:");
-  console.log(`  bunx cloudflared tunnel --url http://localhost:${port}`);
 
   return server;
+}
+
+export async function startTunnel(port: number): Promise<string> {
+  const proc = Bun.spawn(["npx", "cloudflared", "tunnel", "--url", `http://localhost:${port}`], {
+    stderr: "pipe",
+  });
+
+  // cloudflared outputs the URL to stderr
+  const reader = proc.stderr.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const match = buffer.match(/https:\/\/[a-zA-Z0-9\-]+\.trycloudflare\.com/);
+    if (match) {
+      // Release the reader lock so cloudflared keeps running
+      reader.releaseLock();
+      return match[0];
+    }
+  }
+
+  throw new Error("Failed to get tunnel URL from cloudflared");
 }
