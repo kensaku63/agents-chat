@@ -57,7 +57,8 @@ export function openDb(chatDir: string): Database {
 }
 
 export function generateId(): string {
-  return `${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0]!.toString(36)}`;
+  const rand = crypto.getRandomValues(new Uint32Array(2));
+  return `${Date.now().toString(36)}_${rand[0]!.toString(36)}${rand[1]!.toString(36)}`;
 }
 
 export function idToTime(id: string): number {
@@ -258,16 +259,20 @@ export interface Memory {
   created_at: number;
 }
 
-function toMemory(msg: Message): Memory {
-  const meta = JSON.parse(msg.metadata!);
-  const { name } = parseAuthor(msg.author);
-  return {
-    id: msg.id,
-    agent: name,
-    content: msg.content,
-    tags: meta.memory?.tags || [],
-    created_at: idToTime(msg.id),
-  };
+function toMemory(msg: Message): Memory | null {
+  try {
+    const meta = JSON.parse(msg.metadata || "{}");
+    const { name } = parseAuthor(msg.author);
+    return {
+      id: msg.id,
+      agent: name,
+      content: msg.content,
+      tags: meta.memory?.tags || [],
+      created_at: idToTime(msg.id),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function getMemories(db: Database, opts: { agent?: string; tag?: string; search?: string; last?: number } = {}): Memory[] {
@@ -292,12 +297,12 @@ export function getMemories(db: Database, opts: { agent?: string; tag?: string; 
   if (opts.last) {
     return (db.prepare(
       `SELECT * FROM (SELECT * FROM messages WHERE ${where} ORDER BY id DESC LIMIT ?) ORDER BY id ASC`
-    ).all(...params, opts.last) as Message[]).map(toMemory);
+    ).all(...params, opts.last) as Message[]).map(toMemory).filter((m): m is Memory => m !== null);
   }
 
   return (db.prepare(
     `SELECT * FROM messages WHERE ${where} ORDER BY id ASC`
-  ).all(...params) as Message[]).map(toMemory);
+  ).all(...params) as Message[]).map(toMemory).filter((m): m is Memory => m !== null);
 }
 
 // --- Summary ---
@@ -312,18 +317,22 @@ export interface Summary {
   created_at: number;
 }
 
-function toSummary(msg: Message): Summary {
-  const meta = JSON.parse(msg.metadata!);
-  const { name } = parseAuthor(msg.author);
-  return {
-    id: msg.id,
-    channel: meta.summary?.channel || "",
-    agent: name,
-    content: msg.content,
-    period: meta.summary?.period || "",
-    message_count: meta.summary?.message_count || 0,
-    created_at: idToTime(msg.id),
-  };
+function toSummary(msg: Message): Summary | null {
+  try {
+    const meta = JSON.parse(msg.metadata || "{}");
+    const { name } = parseAuthor(msg.author);
+    return {
+      id: msg.id,
+      channel: meta.summary?.channel || "",
+      agent: name,
+      content: msg.content,
+      period: meta.summary?.period || "",
+      message_count: meta.summary?.message_count || 0,
+      created_at: idToTime(msg.id),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function getSummaries(db: Database, channel?: string, last?: number): Summary[] {
@@ -340,11 +349,11 @@ export function getSummaries(db: Database, channel?: string, last?: number): Sum
   if (last) {
     return (db.prepare(
       `SELECT * FROM (SELECT * FROM messages WHERE ${where} ORDER BY id DESC LIMIT ?) ORDER BY id ASC`
-    ).all(...params, last) as Message[]).map(toSummary);
+    ).all(...params, last) as Message[]).map(toSummary).filter((s): s is Summary => s !== null);
   }
 
   return (db.prepare(
     `SELECT * FROM messages WHERE ${where} ORDER BY id ASC`
-  ).all(...params) as Message[]).map(toSummary);
+  ).all(...params) as Message[]).map(toSummary).filter((s): s is Summary => s !== null);
 }
 

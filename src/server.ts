@@ -444,21 +444,27 @@ ingress:
   const reader = proc.stderr.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let timedOut = false;
 
   const timeout = setTimeout(() => {
+    timedOut = true;
     reader.releaseLock();
   }, 15000);
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (!timedOut) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    if (buffer.includes("Registered tunnel connection") || buffer.includes("Connection registered")) {
-      clearTimeout(timeout);
-      reader.releaseLock();
-      return `https://${hostname}`;
+      if (buffer.includes("Registered tunnel connection") || buffer.includes("Connection registered")) {
+        clearTimeout(timeout);
+        reader.releaseLock();
+        return `https://${hostname}`;
+      }
     }
+  } catch {
+    // reader.read() throws after releaseLock from timeout
   }
 
   clearTimeout(timeout);

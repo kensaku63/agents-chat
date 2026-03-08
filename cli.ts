@@ -599,7 +599,13 @@ async function cmdTask(args: string[]) {
       process.exit(1);
     }
 
-    const meta = JSON.parse(original.metadata || "{}");
+    let meta: any;
+    try {
+      meta = JSON.parse(original.metadata || "{}");
+    } catch {
+      console.error(`Error: ${taskId} has invalid metadata`);
+      process.exit(1);
+    }
     if (!meta.task) {
       console.error(`Error: ${taskId} is not a task`);
       process.exit(1);
