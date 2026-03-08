@@ -1,4 +1,4 @@
-import { openDb, insertMessages, insertMessage, ensureChannel, generateId, type Message } from "./db";
+import { openDb, insertMessages, insertMessage, ensureChannel, ensureMember, generateId, type Message } from "./db";
 import { readConfig, readSyncCursor, writeSyncCursor, type ChatConfig } from "./config";
 
 // upstreamとbackup_ownersを順番に返す（重複除外）
@@ -63,6 +63,19 @@ export async function sync(chatDir: string): Promise<{ newMessages: number; newC
   throw lastError;
 }
 
+async function registerMemberToServer(url: string, name: string): Promise<void> {
+  try {
+    await fetch(`${url}/api/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    // 失敗しても送信処理は続ける
+  }
+}
+
 export async function sendToUpstream(chatDir: string, channel: string, author: string, content: string, replyTo?: string): Promise<void> {
   const config = readConfig(chatDir);
   const urls = getUpstreamUrls(config);
@@ -72,6 +85,8 @@ export async function sendToUpstream(chatDir: string, channel: string, author: s
     let lastError: Error = new Error("All upstreams failed");
     for (const url of urls) {
       try {
+        // メッセージ送信と同時にメンバー登録
+        await registerMemberToServer(url, author);
         const res = await fetch(`${url}/api/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -100,11 +115,16 @@ export async function sendToUpstream(chatDir: string, channel: string, author: s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channel, author, content, reply_to: replyTo }),
       });
-      if (res.ok) return;
+      if (res.ok) {
+        // ローカルサーバー経由でもメンバー登録
+        await registerMemberToServer(`http://localhost:${port}`, author);
+        return;
+      }
     } catch {
       // Local server not running, fall through to direct DB write
     }
 
+    // サーバーなし: 直接DBに書き込み（メンバーも登録）
     const db = openDb(chatDir);
     ensureChannel(db, channel);
     insertMessage(db, {
@@ -114,6 +134,7 @@ export async function sendToUpstream(chatDir: string, channel: string, author: s
       content,
       reply_to: replyTo ?? null,
     });
+    ensureMember(db, author);
     db.close();
   }
 }

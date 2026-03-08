@@ -127,6 +127,13 @@ async function cmdJoin(args: string[]) {
   };
   writeConfig(chatDir, config);
 
+  // メンバーとしてサーバーに登録
+  await fetch(`${upstream}/api/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: identity }),
+  }).catch(() => {});
+
   // Initial sync
   const result = await sync(chatDir);
 
