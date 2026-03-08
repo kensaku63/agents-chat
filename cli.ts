@@ -2,7 +2,7 @@
 import { resolve, join, basename } from "node:path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
-import { findChatDir, requireChatDir, readConfig, writeConfig, type ChatConfig } from "./src/config";
+import { findChatDir, requireChatDir, readConfig, writeConfig, readChannelsMeta, writeChannelsMeta, readAgentsConfig, writeAgentsConfig, type ChatConfig, type ChannelsConfig, type AgentsConfig } from "./src/config";
 import { openDb, createChannel, getChannels, queryMessages, getThread, getUnreadMessages, idToTime, getTasks, getMessage, getMemories, getSummaries } from "./src/db";
 import { sync, sendToUpstream, getUpstreamUrls } from "./src/sync";
 import { readReadCursor, writeReadCursor } from "./src/config";
@@ -85,6 +85,8 @@ async function cmdInit(args: string[]) {
   };
   mkdirSync(chatDir, { recursive: true });
   writeConfig(chatDir, config);
+  writeChannelsMeta(chatDir, { general: { description: "General discussion", status: "active" } });
+  writeAgentsConfig(chatDir, {});
 
   const db = openDb(chatDir);
   createChannel(db, "general", "General discussion");
@@ -353,19 +355,41 @@ async function cmdChannels(args: string[]) {
   const channels = getChannels(db);
   db.close();
 
+  // Merge channels.json metadata
+  let channelsMeta: ChannelsConfig = {};
+  const chUrls = getUpstreamUrls(config);
+  if (chUrls.length > 0) {
+    for (const url of chUrls) {
+      try {
+        const res = await fetch(`${url}/api/channels/meta`, { signal: AbortSignal.timeout(5000) });
+        if (res.ok) { channelsMeta = ((await res.json()) as any).channels || {}; break; }
+      } catch { continue; }
+    }
+  } else {
+    channelsMeta = readChannelsMeta(chatDir);
+  }
+
   if (flags.text) {
     if (channels.length === 0) {
       console.log("No channels.");
       return;
     }
     for (const ch of channels) {
-      const desc = ch.description ? ` - ${ch.description}` : "";
-      console.log(`  #${ch.name}${desc}`);
+      const meta = channelsMeta[ch.name];
+      const status = meta?.status ? ` (${meta.status})` : "";
+      const desc = meta?.description || ch.description;
+      const descText = desc ? ` - ${desc}` : "";
+      console.log(`  #${ch.name}${status}${descText}`);
     }
     return;
   }
 
-  console.log(JSON.stringify(channels, null, 2));
+  // Merge meta into channel objects
+  const merged = channels.map(ch => ({
+    ...ch,
+    ...(channelsMeta[ch.name] || {}),
+  }));
+  console.log(JSON.stringify(merged, null, 2));
 }
 
 async function cmdChannelCreate(args: string[]) {
@@ -641,23 +665,38 @@ async function cmdAgent(args: string[]) {
     const { positional, flags } = parseArgs(subArgs);
     const name = positional.join(" ");
     if (!name) {
-      console.error("Usage: chat agent create <name> --role <role> [--channels ch1,ch2]");
+      console.error("Usage: chat agent create <name> --role <role> [--channels ch1,ch2] [--description \"...\"]");
       process.exit(1);
     }
 
     const chatDir = requireChatDir();
     const config = readConfig(chatDir);
     const role = (flags.role as string) || "";
+    const description = (flags.description as string) || "";
     const channels = flags.channels ? (flags.channels as string).split(",") : [];
 
-    if (!config.agents) config.agents = [];
-    const existing = config.agents.findIndex(a => a.name === name);
-    if (existing >= 0) {
-      config.agents[existing] = { name, role, channels };
+    if (config.upstream) {
+      // Member: POST to upstream
+      const urls = getUpstreamUrls(config);
+      let sent = false;
+      for (const url of urls) {
+        try {
+          const res = await fetch(`${url}/api/agents`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, role, description, channels }),
+            signal: AbortSignal.timeout(5000),
+          });
+          if (res.ok) { sent = true; break; }
+        } catch { continue; }
+      }
+      if (!sent) { console.error("Error: Failed to register agent on upstream"); process.exit(1); }
     } else {
-      config.agents.push({ name, role, channels });
+      // Owner: write to agents.json directly
+      const agents = readAgentsConfig(chatDir);
+      agents[name] = { role, description, channels };
+      writeAgentsConfig(chatDir, agents);
     }
-    writeConfig(chatDir, config);
     console.log(`Agent registered: ${name} (${role || "no role"})`);
 
   } else if (sub === "list") {
@@ -665,20 +704,26 @@ async function cmdAgent(args: string[]) {
     const chatDir = requireChatDir();
     const config = readConfig(chatDir);
 
-    let agents = config.agents || [];
+    let agents: AgentsConfig = {};
     const agentUrls = getUpstreamUrls(config);
-    for (const url of agentUrls) {
-      try {
-        const res = await fetch(`${url}/api/agents`, { signal: AbortSignal.timeout(5000) });
-        if (res.ok) { agents = ((await res.json()) as any).agents || []; break; }
-      } catch { continue; }
+    if (agentUrls.length > 0) {
+      for (const url of agentUrls) {
+        try {
+          const res = await fetch(`${url}/api/agents`, { signal: AbortSignal.timeout(5000) });
+          if (res.ok) { agents = ((await res.json()) as any).agents || {}; break; }
+        } catch { continue; }
+      }
+    } else {
+      agents = readAgentsConfig(chatDir);
     }
 
+    const entries = Object.entries(agents);
     if (flags.text) {
-      if (agents.length === 0) { console.log("No agents registered."); return; }
-      for (const a of agents) {
+      if (entries.length === 0) { console.log("No agents registered."); return; }
+      for (const [name, a] of entries) {
         const ch = a.channels.length > 0 ? ` [${a.channels.join(", ")}]` : "";
-        console.log(`  ${a.name} — ${a.role || "(no role)"}${ch}`);
+        const desc = a.description ? ` — ${a.description}` : "";
+        console.log(`  ${name} — ${a.role || "(no role)"}${ch}${desc}`);
       }
       return;
     }
@@ -691,8 +736,24 @@ async function cmdAgent(args: string[]) {
 
     const chatDir = requireChatDir();
     const config = readConfig(chatDir);
-    config.agents = (config.agents || []).filter(a => a.name !== name);
-    writeConfig(chatDir, config);
+
+    if (config.upstream) {
+      // Member: DELETE on upstream
+      const urls = getUpstreamUrls(config);
+      for (const url of urls) {
+        try {
+          const res = await fetch(`${url}/api/agents/${encodeURIComponent(name)}`, {
+            method: "DELETE",
+            signal: AbortSignal.timeout(5000),
+          });
+          if (res.ok) break;
+        } catch { continue; }
+      }
+    } else {
+      const agents = readAgentsConfig(chatDir);
+      delete agents[name];
+      writeAgentsConfig(chatDir, agents);
+    }
     console.log(`Agent removed: ${name}`);
 
   } else {
@@ -728,12 +789,61 @@ async function cmdContext(args: string[]) {
   }
 
   if (!agentName) {
-    // Original behavior: just print CHAT.md
-    if (!chatMdContent) {
-      console.error("CHAT.md not found. Create it in your project root.");
-      process.exit(1);
+    // Enhanced: CHAT.md + channels + agents
+    const output: string[] = [];
+    if (chatMdContent) {
+      output.push(chatMdContent);
+    } else {
+      output.push("(No CHAT.md found)");
     }
-    console.log(chatMdContent);
+
+    // Channels
+    let channelsMeta: ChannelsConfig = {};
+    if (contextUrls.length > 0) {
+      for (const url of contextUrls) {
+        try {
+          const res = await fetch(`${url}/api/channels/meta`, { signal: AbortSignal.timeout(5000) });
+          if (res.ok) { channelsMeta = ((await res.json()) as any).channels || {}; break; }
+        } catch { continue; }
+      }
+    } else {
+      channelsMeta = readChannelsMeta(chatDir);
+    }
+
+    const chEntries = Object.entries(channelsMeta);
+    if (chEntries.length > 0) {
+      output.push("\n## Channels\n");
+      output.push("| Channel | Status | Description |");
+      output.push("|---------|--------|-------------|");
+      for (const [name, meta] of chEntries) {
+        output.push(`| ${name} | ${meta.status} | ${meta.description} |`);
+      }
+    }
+
+    // Agents
+    let agentsConf: AgentsConfig = {};
+    if (contextUrls.length > 0) {
+      for (const url of contextUrls) {
+        try {
+          const res = await fetch(`${url}/api/agents`, { signal: AbortSignal.timeout(5000) });
+          if (res.ok) { agentsConf = ((await res.json()) as any).agents || {}; break; }
+        } catch { continue; }
+      }
+    } else {
+      agentsConf = readAgentsConfig(chatDir);
+    }
+
+    const agEntries = Object.entries(agentsConf);
+    if (agEntries.length > 0) {
+      output.push("\n## Agents\n");
+      output.push("| Name | Role | Channels | Description |");
+      output.push("|------|------|----------|-------------|");
+      for (const [name, a] of agEntries) {
+        output.push(`| ${name} | ${a.role} | ${a.channels.join(", ")} | ${a.description} |`);
+      }
+    }
+
+    console.log(output.join("\n"));
     return;
   }
 
@@ -746,21 +856,25 @@ async function cmdContext(args: string[]) {
     output.push(chatMdContent);
   }
 
-  // L1: Agent registration info
-  let agents = config.agents || [];
+  // L1: Agent registration info (from agents.json)
+  let agentsConf2: AgentsConfig = {};
   for (const url of contextUrls) {
     try {
       const res = await fetch(`${url}/api/agents`, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) { agents = ((await res.json()) as any).agents || []; break; }
+      if (res.ok) { agentsConf2 = ((await res.json()) as any).agents || {}; break; }
     } catch { continue; }
   }
-  const agentInfo = agents.find(a => a.name === agentName);
+  if (Object.keys(agentsConf2).length === 0) {
+    agentsConf2 = readAgentsConfig(chatDir);
+  }
+  const agentInfo = agentsConf2[agentName];
   if (!agentInfo) {
     console.error(`Warning: Agent "${agentName}" is not registered. Use 'chat agent create ${agentName}' to register.`);
   } else {
     output.push("\n---\n## Agent Identity\n");
-    output.push(`- Name: ${agentInfo.name}`);
+    output.push(`- Name: ${agentName}`);
     output.push(`- Role: ${agentInfo.role}`);
+    output.push(`- Description: ${agentInfo.description || "(none)"}`);
     output.push(`- Channels: ${agentInfo.channels.join(", ")}`);
   }
 
@@ -778,8 +892,8 @@ async function cmdContext(args: string[]) {
     }
   }
 
-  // L4: Channel summaries for assigned channels (only if agent is registered)
-  const assignedChannels = agentInfo?.channels || [];
+  // L4: Channel summaries for assigned channels
+  const assignedChannels: string[] = agentInfo?.channels || [];
   const allSummaries = assignedChannels.length > 0 ? getSummaries(db) : [];
   const channelSummaries = new Map<string, typeof allSummaries[0]>();
   for (const s of allSummaries) {

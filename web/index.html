@@ -99,6 +99,98 @@
 
     .channel-item::before { content: '# '; color: var(--text-muted); }
 
+    .channel-status {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+    .channel-status.active { background: #22c55e; }
+    .channel-status.paused { background: #f59e0b; }
+    .channel-status.archived { background: #6c7086; }
+
+    #agents-header {
+      padding: 12px 20px 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    #agent-list {
+      overflow-y: auto;
+      max-height: 180px;
+    }
+
+    .agent-item {
+      padding: 4px 20px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .agent-item-avatar {
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .agent-item-avatar.agent { background: var(--agent-avatar); }
+    .agent-item-avatar.human { background: var(--human-avatar); }
+
+    .agent-item-name { color: var(--sidebar-text); }
+    .agent-item-role { color: var(--text-muted); font-size: 11px; }
+
+    #context-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      margin-left: auto;
+    }
+    #context-btn:hover { background: #f0f0f0; color: var(--text); }
+
+    #context-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    #context-overlay.visible { display: flex; }
+
+    #context-panel {
+      background: #fff;
+      border-radius: 12px;
+      width: 640px;
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
+
+    #context-panel h2 { font-size: 18px; margin-bottom: 16px; }
+    #context-panel h3 { font-size: 14px; margin: 16px 0 8px; color: var(--text-muted); }
+    #context-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #context-panel th { text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--border); }
+    #context-panel td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    #context-panel pre { background: #f5f5f5; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
+
     #identity-bar {
       font-size: 11px;
       padding: 10px 20px;
@@ -164,7 +256,7 @@
       flex-shrink: 0;
     }
 
-    #channel-header::before { content: '# '; color: var(--text-muted); }
+    #channel-header-name::before { content: '# '; color: var(--text-muted); }
 
     #messages { flex: 1; overflow-y: auto; padding: 8px 0; }
 
@@ -408,6 +500,8 @@
         <button id="add-channel-btn" title="チャンネルを追加">+</button>
       </div>
       <div id="channel-list"></div>
+      <div id="agents-header">Agents</div>
+      <div id="agent-list"></div>
       <div id="identity-bar">
         <span>&#x1F464;</span>
         <span id="identity-label"></span>
@@ -419,8 +513,14 @@
       </div>
     </aside>
     <main id="main">
-      <header id="channel-header">general</header>
+      <header id="channel-header" style="display:flex;align-items:center;">
+        <span id="channel-header-name">general</span>
+        <button id="context-btn">Context</button>
+      </header>
       <div id="messages"></div>
+      <div id="context-overlay">
+        <div id="context-panel"></div>
+      </div>
       <div id="input-area">
         <div id="reply-preview">
           <span id="reply-text"></span>
@@ -443,6 +543,8 @@
       channels: [],
       messages: [],
       members: [],
+      agents: {},
+      channelsMeta: {},
       currentChannel: 'general',
       replyTo: null,
       ws: null,
@@ -557,6 +659,19 @@
       });
     }
 
+    async function fetchAgents() {
+      var res = await fetch('/api/agents');
+      var data = await res.json();
+      state.agents = data.agents || {};
+      renderAgents();
+    }
+
+    async function fetchChannelsMeta() {
+      var res = await fetch('/api/channels/meta');
+      var data = await res.json();
+      state.channelsMeta = data.channels || {};
+    }
+
     async function fetchMessages() {
       var res = await fetch('/api/sync');
       var data = await res.json();
@@ -644,18 +759,40 @@
       var list = document.getElementById('channel-list');
       while (list.firstChild) list.removeChild(list.firstChild);
       state.channels.forEach(function(ch) {
+        var meta = state.channelsMeta[ch.name];
         var item = el('div', {
           className: 'channel-item' + (ch.name === state.currentChannel ? ' active' : ''),
-          textContent: ch.name,
-        });
+        }, [
+          ch.name,
+          meta && meta.status ? el('span', {
+            className: 'channel-status ' + meta.status,
+            title: (meta.description || '') + ' (' + meta.status + ')',
+          }) : null,
+        ]);
         item.addEventListener('click', function() { switchChannel(ch.name); });
+        list.appendChild(item);
+      });
+    }
+
+    function renderAgents() {
+      var list = document.getElementById('agent-list');
+      while (list.firstChild) list.removeChild(list.firstChild);
+      var entries = Object.entries(state.agents);
+      entries.forEach(function(entry) {
+        var name = entry[0], info = entry[1];
+        var item = el('div', { className: 'agent-item' }, [
+          el('div', { className: 'agent-item-avatar agent' }, [name.slice(0, 2).toUpperCase()]),
+          el('span', { className: 'agent-item-name' }, [name]),
+          el('span', { className: 'agent-item-role' }, [info.role || '']),
+        ]);
+        item.title = info.description || '';
         list.appendChild(item);
       });
     }
 
     function switchChannel(name) {
       state.currentChannel = name;
-      document.getElementById('channel-header').textContent = name;
+      document.getElementById('channel-header-name').textContent = name;
       renderChannels();
       renderMessages();
       cancelReply();
@@ -914,6 +1051,70 @@
       switchChannel(name);
     });
 
+    document.getElementById('context-btn').addEventListener('click', async function() {
+      var panel = document.getElementById('context-panel');
+      while (panel.firstChild) panel.removeChild(panel.firstChild);
+      panel.appendChild(el('h2', {}, ['Loading...']));
+      document.getElementById('context-overlay').classList.add('visible');
+
+      var res = await fetch('/api/context');
+      var data = await res.json();
+
+      while (panel.firstChild) panel.removeChild(panel.firstChild);
+      panel.appendChild(el('h2', {}, ['Project Context']));
+
+      if (data.content) {
+        var pre = el('pre', {});
+        pre.textContent = data.content;
+        panel.appendChild(pre);
+      }
+
+      var channels = data.channels || {};
+      var chEntries = Object.entries(channels);
+      if (chEntries.length > 0) {
+        panel.appendChild(el('h3', {}, ['Channels']));
+        var chTable = el('table', {}, [
+          el('tr', {}, [el('th', {}, ['Channel']), el('th', {}, ['Status']), el('th', {}, ['Description'])]),
+        ]);
+        chEntries.forEach(function(e) {
+          chTable.appendChild(el('tr', {}, [
+            el('td', {}, ['#' + e[0]]),
+            el('td', {}, [e[1].status || '']),
+            el('td', {}, [e[1].description || '']),
+          ]));
+        });
+        panel.appendChild(chTable);
+      }
+
+      var agents = data.agents || {};
+      var agEntries = Object.entries(agents);
+      if (agEntries.length > 0) {
+        panel.appendChild(el('h3', {}, ['Agents']));
+        var agTable = el('table', {}, [
+          el('tr', {}, [el('th', {}, ['Name']), el('th', {}, ['Role']), el('th', {}, ['Channels']), el('th', {}, ['Description'])]),
+        ]);
+        agEntries.forEach(function(e) {
+          agTable.appendChild(el('tr', {}, [
+            el('td', {}, [e[0]]),
+            el('td', {}, [e[1].role || '']),
+            el('td', {}, [(e[1].channels || []).join(', ')]),
+            el('td', {}, [e[1].description || '']),
+          ]));
+        });
+        panel.appendChild(agTable);
+      }
+
+      var footer = el('p', { className: '' }, ['Files: .chat/channels.json, .chat/agents.json']);
+      footer.style.marginTop = '16px';
+      footer.style.fontSize = '11px';
+      footer.style.color = '#999';
+      panel.appendChild(footer);
+    });
+
+    document.getElementById('context-overlay').addEventListener('click', function(e) {
+      if (e.target === this) this.classList.remove('visible');
+    });
+
     document.getElementById('identity-change-btn').addEventListener('click', async function() {
       var current = state.identity;
       var newName = prompt('新しい名前を入力してください:', current);
@@ -931,6 +1132,8 @@
       await fetchInfo();
       await registerMember(state.identity);
       await fetchMembers();
+      await fetchAgents();
+      await fetchChannelsMeta();
       await fetchChannels();
       await fetchMessages();
       connectWS();

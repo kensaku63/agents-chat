@@ -1,5 +1,5 @@
 import { openDb, insertMessages, insertMessage, ensureChannel, ensureMember, generateId, type Message } from "./db";
-import { readConfig, readSyncCursor, writeSyncCursor, type ChatConfig } from "./config";
+import { readConfig, readSyncCursor, writeSyncCursor, writeChannelsMeta, writeAgentsConfig, type ChatConfig } from "./config";
 
 // upstreamとbackup_ownersを順番に返す（重複除外）
 export function getUpstreamUrls(config: ChatConfig): string[] {
@@ -48,6 +48,22 @@ export async function sync(chatDir: string): Promise<{ newMessages: number; newC
       const inserted = insertMessages(db, data.messages);
       writeSyncCursor(chatDir, data.cursor);
       db.close();
+
+      // Sync channels.json and agents.json from upstream
+      try {
+        const [chRes, agRes] = await Promise.all([
+          fetch(`${url}/api/channels/meta`, { signal: AbortSignal.timeout(5000) }),
+          fetch(`${url}/api/agents`, { signal: AbortSignal.timeout(5000) }),
+        ]);
+        if (chRes.ok) {
+          const chData = (await chRes.json()) as { channels: any };
+          if (chData.channels) writeChannelsMeta(chatDir, chData.channels);
+        }
+        if (agRes.ok) {
+          const agData = (await agRes.json()) as { agents: any };
+          if (agData.agents) writeAgentsConfig(chatDir, agData.agents);
+        }
+      } catch {}
 
       if (url !== config.upstream) {
         console.log(`  (フォールバック: ${url} から同期)`);
