@@ -182,6 +182,56 @@ export function rebuildMembers(db: Database): void {
   }
 }
 
+export interface Task {
+  id: string;
+  name: string;
+  assignee: string;
+  detail: string;
+  status: "pending" | "active" | "done";
+  channel: string;
+  author: string;
+}
+
+export function getTasks(db: Database, statusFilter?: string): Task[] {
+  const taskMsgs = db.prepare(
+    "SELECT * FROM messages WHERE json_extract(metadata, '$.task') IS NOT NULL ORDER BY id ASC"
+  ).all() as Message[];
+
+  const tasks: Task[] = [];
+  for (const msg of taskMsgs) {
+    try {
+      const meta = JSON.parse(msg.metadata!);
+      if (!meta.task?.name) continue;
+
+      const latestUpdate = db.prepare(
+        "SELECT metadata FROM messages WHERE reply_to = ? AND json_extract(metadata, '$.task_update') IS NOT NULL ORDER BY id DESC LIMIT 1"
+      ).get(msg.id) as { metadata: string } | null;
+
+      let status = meta.task.status || "pending";
+      if (latestUpdate) {
+        try {
+          const u = JSON.parse(latestUpdate.metadata);
+          if (u.task_update?.status) status = u.task_update.status;
+        } catch {}
+      }
+
+      if (statusFilter && status !== statusFilter) continue;
+
+      tasks.push({
+        id: msg.id,
+        name: meta.task.name,
+        assignee: meta.task.assignee || "",
+        detail: meta.task.detail || "",
+        status,
+        channel: msg.channel,
+        author: msg.author,
+      });
+    } catch {}
+  }
+
+  return tasks;
+}
+
 export function getUnreadMessages(db: Database, sinceId: string): Message[] {
   if (!sinceId) {
     return db.prepare("SELECT * FROM messages ORDER BY id ASC").all() as Message[];

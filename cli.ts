@@ -3,7 +3,7 @@ import { resolve, join, basename } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { findChatDir, requireChatDir, readConfig, writeConfig, type ChatConfig } from "./src/config";
-import { openDb, createChannel, getChannels, queryMessages, getThread, getUnreadMessages, idToTime } from "./src/db";
+import { openDb, createChannel, getChannels, queryMessages, getThread, getUnreadMessages, idToTime, getTasks, getMessage } from "./src/db";
 import { sync, sendToUpstream } from "./src/sync";
 import { readReadCursor, writeReadCursor } from "./src/config";
 import { startServer, startTunnel, startNamedTunnel, isCloudflaredLoggedIn, startStandbyMode, syncFromBackups } from "./src/server";
@@ -504,6 +504,113 @@ async function cmdStatus() {
   console.log(`  Messages:  ${allMsgs.count}`);
 }
 
+async function cmdTask(args: string[]) {
+  const sub = args[0];
+  const subArgs = args.slice(1);
+
+  if (sub === "create") {
+    const { positional, flags } = parseArgs(subArgs);
+    const name = positional.join(" ");
+    if (!name) {
+      console.error("Usage: chat task create <name> --assign <user> [--detail \"...\"] [--channel <ch>]");
+      process.exit(1);
+    }
+
+    const chatDir = requireChatDir();
+    const config = readConfig(chatDir);
+    const assignee = (flags.assign as string) || "";
+    const detail = (flags.detail as string) || "";
+    const channel = (flags.channel as string) || "general";
+
+    let author: string;
+    if (flags["agent-name"]) {
+      author = `agent:${flags["agent-name"]}@${config.identity}`;
+    } else if (flags.agent) {
+      author = `agent@${config.identity}`;
+    } else {
+      author = config.identity;
+    }
+
+    const metadata = JSON.stringify({ task: { name, assignee, detail, status: "pending" } });
+    const assignText = assignee ? ` → @${assignee}` : "";
+    const content = `[Task] ${name}${assignText}`;
+
+    await sendToUpstream(chatDir, channel, author, content, undefined, metadata);
+    console.log("ok");
+
+  } else if (sub === "list") {
+    const { flags } = parseArgs(subArgs);
+    const chatDir = requireChatDir();
+    const config = readConfig(chatDir);
+
+    if (config.upstream) await sync(chatDir);
+
+    const db = openDb(chatDir);
+    const tasks = getTasks(db, flags.status as string | undefined);
+    db.close();
+
+    if (flags.text) {
+      if (tasks.length === 0) { console.log("No tasks."); return; }
+      for (const t of tasks) {
+        const mark = t.status === "done" ? "x" : t.status === "active" ? ">" : " ";
+        const assignText = t.assignee ? ` → @${t.assignee}` : "";
+        console.log(`  [${mark}] ${t.name}${assignText}  (${t.status}) id:${t.id}`);
+      }
+      return;
+    }
+    console.log(JSON.stringify(tasks, null, 2));
+
+  } else if (sub === "update") {
+    const { positional, flags } = parseArgs(subArgs);
+    const taskId = positional[0];
+    const status = flags.status as string;
+
+    if (!taskId || !status) {
+      console.error("Usage: chat task update <id> --status <pending|active|done>");
+      process.exit(1);
+    }
+    if (!["pending", "active", "done"].includes(status)) {
+      console.error("Error: status must be pending, active, or done");
+      process.exit(1);
+    }
+
+    const chatDir = requireChatDir();
+    const config = readConfig(chatDir);
+
+    if (config.upstream) await sync(chatDir);
+
+    const db = openDb(chatDir);
+    const original = getMessage(db, taskId);
+    db.close();
+
+    if (!original) {
+      console.error(`Task not found: ${taskId}`);
+      process.exit(1);
+    }
+
+    let author: string;
+    if (flags["agent-name"]) {
+      author = `agent:${flags["agent-name"]}@${config.identity}`;
+    } else if (flags.agent) {
+      author = `agent@${config.identity}`;
+    } else {
+      author = config.identity;
+    }
+
+    const meta = JSON.parse(original.metadata || "{}");
+    const taskName = meta.task?.name || "Unknown";
+    const metadata = JSON.stringify({ task_update: { status } });
+    const content = `[Task] ${taskName} → ${status}`;
+
+    await sendToUpstream(chatDir, original.channel, author, content, taskId, metadata);
+    console.log("ok");
+
+  } else {
+    console.error("Usage: chat task <create|list|update>");
+    process.exit(1);
+  }
+}
+
 // --- Help ---
 
 function showHelp() {
@@ -543,6 +650,15 @@ Commands:
   channels [--sync]                List channels (default: JSON output)
     --text                        Output as human-readable text
   channel:create <name> [desc]    Create a channel
+
+  task create <name>              Create a task
+    --assign <user>               Assign to a user
+    --detail "..."                Task details
+    --channel <ch>                Channel (default: general)
+  task list [--status S]          List tasks (S: pending|active|done)
+    --text                        Output as human-readable text
+  task update <id> --status S     Update task status
+
   status                          Show chat info
 
 Options:
@@ -565,6 +681,7 @@ switch (cmd) {
   case "channel:create": await cmdChannelCreate(args); break;
   case "thread":         await cmdThread(args); break;
   case "unread":         await cmdUnread(args); break;
+  case "task":           await cmdTask(args); break;
   case "status":         await cmdStatus(); break;
   case "help": case "--help": case "-h": case undefined:
     showHelp(); break;
