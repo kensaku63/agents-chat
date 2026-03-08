@@ -250,6 +250,63 @@
       word-break: break-word;
     }
 
+    .mention {
+      color: var(--accent);
+      font-weight: 600;
+      background: var(--accent-light);
+      border-radius: 3px;
+      padding: 0 2px;
+    }
+
+    .mention.me {
+      background: #fef3c7;
+      color: #b45309;
+    }
+
+    /* @メンション オートコンプリート */
+    #mention-popup {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 4px;
+      z-index: 10;
+    }
+
+    #mention-popup.visible { display: block; }
+
+    .mention-item {
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mention-item:hover, .mention-item.selected { background: var(--accent-light); }
+
+    .mention-item-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      background: var(--human-avatar);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
     .msg-actions { opacity: 0; transition: opacity 0.1s; margin-top: 2px; }
     .message:hover .msg-actions { opacity: 1; }
 
@@ -303,7 +360,7 @@
 
     .cancel-reply:hover { color: #666; }
 
-    #input-row { display: flex; gap: 8px; }
+    #input-row { display: flex; gap: 8px; position: relative; }
 
     #message-input {
       flex: 1;
@@ -366,7 +423,8 @@
           <span class="cancel-reply" id="cancel-reply-btn"></span>
         </div>
         <div id="input-row">
-          <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+          <div id="mention-popup"></div>
+          <input type="text" id="message-input" placeholder="Type a message... (@名前 でメンション)" autocomplete="off">
           <button id="send-btn">Send</button>
         </div>
       </div>
@@ -380,9 +438,12 @@
       identity: '',
       channels: [],
       messages: [],
+      members: [],
       currentChannel: 'general',
       replyTo: null,
       ws: null,
+      mentionQuery: null,      // @以降の入力文字列（nullならポップアップ非表示）
+      mentionSelectedIdx: 0,   // ポップアップ内の選択インデックス
     };
 
     // --- Helpers ---
@@ -452,6 +513,20 @@
       var data = await res.json();
       state.channels = data.channels;
       renderChannels();
+    }
+
+    async function fetchMembers() {
+      var res = await fetch('/api/members');
+      var data = await res.json();
+      state.members = data.members.map(function(m) { return m.name; });
+    }
+
+    async function registerMember(name) {
+      await fetch('/api/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name }),
+      });
     }
 
     async function fetchMessages() {
@@ -575,8 +650,15 @@
       headerChildren.push(el('span', { className: 'msg-time' }, [formatTime(msg.id)]));
       var header = el('div', { className: 'msg-header' }, headerChildren);
 
-      // Content
-      var content = el('div', { className: 'msg-content' }, [msg.content]);
+      // Content（@メンションをハイライト）
+      var content = el('div', { className: 'msg-content' });
+      content.innerHTML = msg.content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(
+        /@([\w\-\.]+)/g,
+        function(match, name) {
+          var isMe = name === state.identity || name === state.identity.replace('agent@', '');
+          return '<span class="mention' + (isMe ? ' me' : '') + '">' + match + '</span>';
+        }
+      );
 
       // Actions
       var replyBtn = el('button', { 'data-reply-btn': msg.id }, ['Reply']);
@@ -673,11 +755,104 @@
     document.getElementById('cancel-reply-btn').textContent = '\u00D7';
     document.getElementById('cancel-reply-btn').addEventListener('click', cancelReply);
 
+    // --- @メンション オートコンプリート ---
+
+    function getMentionCandidates(query) {
+      var q = query.toLowerCase();
+      return state.members.filter(function(m) {
+        return m.toLowerCase().startsWith(q);
+      }).slice(0, 8);
+    }
+
+    function showMentionPopup(candidates) {
+      var popup = document.getElementById('mention-popup');
+      while (popup.firstChild) popup.removeChild(popup.firstChild);
+
+      if (candidates.length === 0) {
+        hideMentionPopup();
+        return;
+      }
+
+      candidates.forEach(function(name, i) {
+        var item = el('div', { className: 'mention-item' + (i === state.mentionSelectedIdx ? ' selected' : '') }, [
+          el('div', { className: 'mention-item-avatar' }, [name.slice(0, 2).toUpperCase()]),
+          el('span', {}, ['@' + name]),
+        ]);
+        item.addEventListener('mousedown', function(e) {
+          e.preventDefault();  // inputのblurを防ぐ
+          insertMention(name);
+        });
+        popup.appendChild(item);
+      });
+
+      popup.classList.add('visible');
+    }
+
+    function hideMentionPopup() {
+      document.getElementById('mention-popup').classList.remove('visible');
+      state.mentionQuery = null;
+      state.mentionSelectedIdx = 0;
+    }
+
+    function insertMention(name) {
+      var input = document.getElementById('message-input');
+      var val = input.value;
+      // @query 部分を @name + スペースで置換
+      var atPos = val.lastIndexOf('@');
+      input.value = val.slice(0, atPos) + '@' + name + ' ';
+      hideMentionPopup();
+      input.focus();
+    }
+
+    document.getElementById('message-input').addEventListener('input', function() {
+      var val = this.value;
+      var atPos = val.lastIndexOf('@');
+      if (atPos === -1) { hideMentionPopup(); return; }
+
+      // @ の直前が空白またはの先頭であること
+      var before = val[atPos - 1];
+      if (atPos > 0 && before !== ' ' && before !== '\n') { hideMentionPopup(); return; }
+
+      var query = val.slice(atPos + 1);
+      // スペースが入ったらポップアップを閉じる
+      if (query.includes(' ')) { hideMentionPopup(); return; }
+
+      state.mentionQuery = query;
+      state.mentionSelectedIdx = 0;
+      showMentionPopup(getMentionCandidates(query));
+    });
+
     document.getElementById('message-input').addEventListener('keydown', function(e) {
       // isComposing が true の間は IME 変換中なので Enter を無視する
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        // ポップアップが開いていたら選択確定
+        if (document.getElementById('mention-popup').classList.contains('visible')) {
+          e.preventDefault();
+          var candidates = getMentionCandidates(state.mentionQuery || '');
+          if (candidates[state.mentionSelectedIdx]) {
+            insertMention(candidates[state.mentionSelectedIdx]);
+          }
+          return;
+        }
         e.preventDefault();
         sendMessage();
+        return;
+      }
+
+      // ポップアップ開中の↑↓キー操作
+      if (document.getElementById('mention-popup').classList.contains('visible')) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          var cands = getMentionCandidates(state.mentionQuery || '');
+          state.mentionSelectedIdx = Math.min(state.mentionSelectedIdx + 1, cands.length - 1);
+          showMentionPopup(cands);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          state.mentionSelectedIdx = Math.max(state.mentionSelectedIdx - 1, 0);
+          showMentionPopup(getMentionCandidates(state.mentionQuery || ''));
+        } else if (e.key === 'Escape') {
+          hideMentionPopup();
+        }
       }
     });
 
@@ -715,6 +890,8 @@
 
     async function init() {
       await fetchInfo();
+      await registerMember(state.identity);  // 自分をメンバーとして登録
+      await fetchMembers();
       await fetchChannels();
       await fetchMessages();
       connectWS();

@@ -1,5 +1,5 @@
 import { networkInterfaces } from "node:os";
-import { openDb, getAllMessages, getMessagesSince, insertMessage, insertMessages, ensureChannel, getChannels, generateId, type Message } from "./db";
+import { openDb, getAllMessages, getMessagesSince, insertMessage, insertMessages, ensureChannel, getChannels, generateId, ensureMember, getMembers, type Message } from "./db";
 import { readConfig, readSyncCursor } from "./config";
 import webHtml from "../web/index.html" with { type: "text" };
 
@@ -54,6 +54,20 @@ export function startServer(chatDir: string, port: number) {
           owner: config.identity,
           backup_owners: config.backup_owners ?? [],
         }, { headers });
+      }
+
+      // GET /api/members
+      if (path === "/api/members" && req.method === "GET") {
+        return Response.json({ members: getMembers(db) }, { headers });
+      }
+
+      // POST /api/members
+      if (path === "/api/members" && req.method === "POST") {
+        let body: { name: string };
+        try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
+        if (!body.name) return Response.json({ error: "name is required" }, { status: 400, headers });
+        ensureMember(db, body.name);
+        return Response.json({ ok: true }, { headers });
       }
 
       // GET /api/channels

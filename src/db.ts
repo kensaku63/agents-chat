@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel, id);
+
+CREATE TABLE IF NOT EXISTS members (
+  name TEXT PRIMARY KEY,
+  joined_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 export interface Message {
@@ -109,5 +114,13 @@ export function createChannel(db: Database, name: string, description = ""): voi
 
 export function ensureChannel(db: Database, name: string): void {
   db.run("INSERT OR IGNORE INTO channels (name) VALUES (?)", [name]);
+}
+
+export function ensureMember(db: Database, name: string): void {
+  db.run("INSERT OR IGNORE INTO members (name) VALUES (?)", [name]);
+}
+
+export function getMembers(db: Database): { name: string; joined_at: string }[] {
+  return db.prepare("SELECT * FROM members ORDER BY name").all() as any[];
 }
 
