@@ -1,5 +1,5 @@
 import { networkInterfaces } from "node:os";
-import { openDb, getAllMessages, getMessagesSince, insertMessage, insertMessages, ensureChannel, getChannels, generateId, type Message } from "./db";
+import { openDb, getAllMessages, getMessagesSince, insertMessage, insertMessages, createChannel, ensureChannel, getChannels, generateId, ensureMember, getMembers, type Message } from "./db";
 import { readConfig, readSyncCursor } from "./config";
 import webHtml from "../web/index.html" with { type: "text" };
 
@@ -56,6 +56,21 @@ export function startServer(chatDir: string, port: number) {
         }, { headers });
       }
 
+      // GET /api/members
+      if (path === "/api/members" && req.method === "GET") {
+        return Response.json({ members: getMembers(db) }, { headers });
+      }
+
+      // POST /api/members - name can be author string (e.g. "agent:Opus@kensaku") or plain name
+      if (path === "/api/members" && req.method === "POST") {
+        let body: { name: string };
+        try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
+        if (!body.name) return Response.json({ error: "name is required" }, { status: 400, headers });
+        ensureMember(db, body.name);
+        server.publish("chat", JSON.stringify({ type: "members", members: getMembers(db) }));
+        return Response.json({ ok: true }, { headers });
+      }
+
       // GET /api/channels
       if (path === "/api/channels" && req.method === "GET") {
         return Response.json({ channels: getChannels(db) }, { headers });
@@ -66,7 +81,8 @@ export function startServer(chatDir: string, port: number) {
         let body: { name: string; description?: string };
         try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
         if (!body.name) return Response.json({ error: "name is required" }, { status: 400, headers });
-        ensureChannel(db, body.name);
+        createChannel(db, body.name, body.description ?? "");
+        server.publish("chat", JSON.stringify({ type: "channel", name: body.name, description: body.description ?? "" }));
         return Response.json({ ok: true }, { headers });
       }
 
@@ -81,7 +97,7 @@ export function startServer(chatDir: string, port: number) {
 
       // POST /api/messages
       if (path === "/api/messages" && req.method === "POST") {
-        let body: { channel: string; author: string; content: string; reply_to?: string };
+        let body: { channel: string; author: string; content: string; reply_to?: string; metadata?: string };
         try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
 
         if (!body.channel || !body.author || !body.content) {
@@ -94,10 +110,12 @@ export function startServer(chatDir: string, port: number) {
           author: body.author,
           content: body.content,
           reply_to: body.reply_to ?? null,
+          metadata: body.metadata ?? null,
         };
 
         ensureChannel(db, msg.channel);
         insertMessage(db, msg);
+        ensureMember(db, msg.author);
 
         // Broadcast to all WebSocket clients
         server.publish("chat", JSON.stringify({ type: "msg", ...msg }));
@@ -126,7 +144,7 @@ export function startServer(chatDir: string, port: number) {
         try {
           const data = JSON.parse(raw as string);
           if (data.type === "send") {
-            const { channel, author, content, reply_to } = data;
+            const { channel, author, content, reply_to, metadata } = data;
             if (!channel || !author || !content) {
               ws.send(JSON.stringify({ type: "error", error: "channel, author, content required" }));
               return;
@@ -137,9 +155,11 @@ export function startServer(chatDir: string, port: number) {
               author,
               content,
               reply_to: reply_to ?? null,
+              metadata: metadata ?? null,
             };
             ensureChannel(db, msg.channel);
             insertMessage(db, msg);
+            ensureMember(db, msg.author);
 
             ws.send(JSON.stringify({ type: "ack", ok: true }));
             // Broadcast to all (publish sends to others, send to self)
@@ -284,12 +304,12 @@ export async function syncFromBackups(chatDir: string): Promise<void> {
   }
 }
 
+// Quick tunnel (random URL, no login required)
 export async function startTunnel(port: number): Promise<string> {
-  const proc = Bun.spawn(["npx", "cloudflared", "tunnel", "--url", `http://localhost:${port}`], {
+  const proc = Bun.spawn(["cloudflared", "tunnel", "--url", `http://localhost:${port}`], {
     stderr: "pipe",
   });
 
-  // cloudflared outputs the URL to stderr
   const reader = proc.stderr.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -301,11 +321,125 @@ export async function startTunnel(port: number): Promise<string> {
 
     const match = buffer.match(/https:\/\/[a-zA-Z0-9\-]+\.trycloudflare\.com/);
     if (match) {
-      // Release the reader lock so cloudflared keeps running
       reader.releaseLock();
       return match[0];
     }
   }
 
   throw new Error("Failed to get tunnel URL from cloudflared");
+}
+
+// Check if cloudflared is logged in
+export function isCloudflaredLoggedIn(): boolean {
+  const { existsSync } = require("node:fs");
+  const { join } = require("node:path");
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  return existsSync(join(home, ".cloudflared", "cert.pem"));
+}
+
+// Named tunnel (fixed URL, requires Cloudflare login + domain)
+export async function startNamedTunnel(port: number, tunnelName: string, hostname: string): Promise<string> {
+  const { existsSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const credDir = join(home, ".cloudflared");
+
+  // 1. Get tunnel info (or create if it doesn't exist)
+  let tunnelId = "";
+
+  const listProc = Bun.spawn(["cloudflared", "tunnel", "list", "--name", tunnelName, "--output", "json"], {
+    stdout: "pipe", stderr: "pipe",
+  });
+  const listOut = await new Response(listProc.stdout).text();
+  await listProc.exited;
+
+  try {
+    const tunnels = JSON.parse(listOut);
+    if (tunnels.length > 0) {
+      tunnelId = tunnels[0].id;
+      console.log(`  Using existing tunnel "${tunnelName}" (${tunnelId})`);
+    }
+  } catch {}
+
+  if (!tunnelId) {
+    console.log(`  Creating tunnel "${tunnelName}"...`);
+    const createProc = Bun.spawn(["cloudflared", "tunnel", "create", tunnelName], {
+      stdout: "pipe", stderr: "pipe",
+    });
+    const createOut = await new Response(createProc.stdout).text();
+    const createErr = await new Response(createProc.stderr).text();
+    const exitCode = await createProc.exited;
+    if (exitCode !== 0) {
+      throw new Error(`Failed to create tunnel: ${createErr || createOut}`);
+    }
+    // Re-list to get the tunnel ID
+    const reList = Bun.spawn(["cloudflared", "tunnel", "list", "--name", tunnelName, "--output", "json"], {
+      stdout: "pipe", stderr: "pipe",
+    });
+    const reListOut = await new Response(reList.stdout).text();
+    await reList.exited;
+    try {
+      const t = JSON.parse(reListOut);
+      tunnelId = t[0]?.id || "";
+    } catch {}
+    if (!tunnelId) throw new Error("Failed to get tunnel ID after creation");
+    console.log(`  Tunnel "${tunnelName}" created (${tunnelId})`);
+  }
+
+  // 2. Verify credentials file exists for this specific tunnel
+  const credFile = join(credDir, `${tunnelId}.json`);
+  if (!existsSync(credFile)) {
+    throw new Error(`Credentials file not found: ${credFile}`);
+  }
+
+  // 3. Route DNS
+  console.log(`  Routing DNS: ${hostname} → tunnel "${tunnelName}"...`);
+  const routeProc = Bun.spawn(["cloudflared", "tunnel", "route", "dns", "--overwrite-dns", tunnelName, hostname], {
+    stdout: "pipe", stderr: "pipe",
+  });
+  const routeExit = await routeProc.exited;
+  if (routeExit !== 0) {
+    const routeErr = await new Response(routeProc.stderr).text();
+    console.warn(`  Warning: DNS route may have failed: ${routeErr.trim()}`);
+  }
+
+  // 4. Write config file
+  const configContent = `tunnel: ${tunnelId}
+credentials-file: ${credFile}
+ingress:
+  - hostname: ${hostname}
+    service: http://localhost:${port}
+  - service: http_status:404
+`;
+  const configPath = join(credDir, `${tunnelName}.yml`);
+  writeFileSync(configPath, configContent);
+
+  // 5. Run the named tunnel
+  const proc = Bun.spawn(["cloudflared", "tunnel", "--config", configPath, "run", tunnelId], {
+    stderr: "pipe",
+  });
+
+  // Wait for connection to be established
+  const reader = proc.stderr.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const timeout = setTimeout(() => {
+    reader.releaseLock();
+  }, 15000);
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    if (buffer.includes("Registered tunnel connection") || buffer.includes("Connection registered")) {
+      clearTimeout(timeout);
+      reader.releaseLock();
+      return `https://${hostname}`;
+    }
+  }
+
+  clearTimeout(timeout);
+  throw new Error("Tunnel failed to establish connection within 15 seconds");
 }

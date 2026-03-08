@@ -3,9 +3,10 @@ import { resolve, join, basename } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { findChatDir, requireChatDir, readConfig, writeConfig, type ChatConfig } from "./src/config";
-import { openDb, createChannel, getChannels, queryMessages, idToTime } from "./src/db";
+import { openDb, createChannel, getChannels, queryMessages, getThread, getUnreadMessages, idToTime } from "./src/db";
 import { sync, sendToUpstream } from "./src/sync";
-import { startServer, startTunnel, startStandbyMode, syncFromBackups } from "./src/server";
+import { readReadCursor, writeReadCursor } from "./src/config";
+import { startServer, startTunnel, startNamedTunnel, isCloudflaredLoggedIn, startStandbyMode, syncFromBackups } from "./src/server";
 
 // --- Arg parsing ---
 
@@ -51,6 +52,15 @@ function formatTime(id: string): string {
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
   return `${mm}/${dd} ${hh}:${mi}`;
+}
+
+// Strip null/undefined fields from objects for cleaner JSON output
+function stripNulls<T extends Record<string, any>>(obj: T): Partial<T> {
+  const result: any = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v != null) result[k] = v;
+  }
+  return result;
 }
 
 // --- Commands ---
@@ -127,6 +137,13 @@ async function cmdJoin(args: string[]) {
   };
   writeConfig(chatDir, config);
 
+  // メンバーとしてサーバーに登録
+  await fetch(`${upstream}/api/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: identity }),
+  }).catch(() => {});
+
   // Initial sync
   const result = await sync(chatDir);
 
@@ -140,26 +157,77 @@ async function cmdJoin(args: string[]) {
 async function cmdServe(args: string[]) {
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
-
-  if (config.upstream) {
-    console.error("Error: 'serve' is for owners only. Use 'chat watch' for real-time messages.");
-    process.exit(1);
-  }
-
   const { flags } = parseArgs(args);
   const port = parseInt(flags.port as string) || config.port || 4321;
 
+  // スタンバイモードはメンバー（upstream あり）が使う
   if (flags.standby) {
-    // スタンバイモード: Primaryを監視し、落ちたら自動でサーバーを引き継ぐ
+    if (!config.upstream) {
+      console.error("Error: --standby is for members only (upstream required).");
+      process.exit(1);
+    }
     await startStandbyMode(chatDir, port);
-  } else {
-    // Owner: バックアップから差分マージ後にサーバー起動
-    await syncFromBackups(chatDir);
-    startServer(chatDir, port);
+    return;
   }
 
-  const useTunnel = !flags["no-tunnel"];
-  if (useTunnel) {
+  // 通常の serve は owner のみ
+  if (config.upstream) {
+    console.error("Error: 'serve' is for owners only. Use --standby for backup mode.");
+    process.exit(1);
+  }
+
+  // Kill existing server on the same port if running
+  try {
+    const res = await fetch(`http://localhost:${port}/api/info`, { signal: AbortSignal.timeout(1000) });
+    if (res.ok) {
+      console.log(`Stopping existing server on port ${port}...`);
+      const proc = Bun.spawn(["fuser", "-k", `${port}/tcp`], { stdout: "pipe", stderr: "pipe" });
+      await proc.exited;
+      await Bun.sleep(500);
+    }
+  } catch {
+    // No existing server, continue
+  }
+
+  // Owner: バックアップから差分マージ後にサーバー起動
+  await syncFromBackups(chatDir);
+  startServer(chatDir, port);
+
+  const tunnelName = (flags["tunnel-name"] as string) || config.tunnel_name;
+  const tunnelHostname = (flags["tunnel-hostname"] as string) || config.tunnel_hostname;
+
+  if (flags["no-tunnel"]) {
+    // No tunnel
+  } else if (tunnelName && tunnelHostname) {
+    // Named tunnel (fixed URL)
+    if (!isCloudflaredLoggedIn()) {
+      console.log("\nCloudflare にログインが必要です。ブラウザが開きます...");
+      const loginProc = Bun.spawn(["cloudflared", "tunnel", "login"], {
+        stdout: "inherit", stderr: "inherit",
+      });
+      await loginProc.exited;
+      if (!isCloudflaredLoggedIn()) {
+        console.error("Error: Cloudflare ログインに失敗しました。");
+        process.exit(1);
+      }
+    }
+    console.log("\nStarting named tunnel...");
+    const tunnelUrl = await startNamedTunnel(port, tunnelName, tunnelHostname);
+    // Save to config for next time
+    if (!config.tunnel_name || !config.tunnel_hostname) {
+      config.tunnel_name = tunnelName;
+      config.tunnel_hostname = tunnelHostname;
+      writeConfig(chatDir, config);
+    }
+    console.log(`\n  Public (fixed): ${tunnelUrl}`);
+    console.log(`\n  Share with team:`);
+    console.log(`    chat join ${tunnelUrl}`);
+  } else if (tunnelName && !tunnelHostname) {
+    console.error("Error: --tunnel-hostname <hostname> も指定してください。");
+    console.error("  例: chat serve --tunnel-name myapp --tunnel-hostname chat.example.com");
+    process.exit(1);
+  } else {
+    // Quick tunnel (random URL)
     console.log("\nStarting tunnel...");
     const tunnelUrl = await startTunnel(port);
     console.log(`\n  Public: ${tunnelUrl}`);
@@ -191,13 +259,20 @@ async function cmdSend(args: string[]) {
   const content = positional.slice(1).join(" ");
 
   if (!channel || !content) {
-    console.error("Usage: chat send <channel> <message> [--agent]");
+    console.error("Usage: chat send <channel> <message> [--agent] [--agent-name <name>]");
     process.exit(1);
   }
 
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
-  const author = flags.agent ? `agent@${config.identity}` : config.identity;
+  let author: string;
+  if (flags["agent-name"]) {
+    author = `agent:${flags["agent-name"]}@${config.identity}`;
+  } else if (flags.agent) {
+    author = `agent@${config.identity}`;
+  } else {
+    author = config.identity;
+  }
 
   await sendToUpstream(chatDir, channel, author, content, flags["reply-to"] as string);
   console.log("ok");
@@ -208,7 +283,7 @@ async function cmdRead(args: string[]) {
   const channel = positional[0];
 
   if (!channel) {
-    console.error("Usage: chat read <channel> [--last N] [--since T] [--search Q] [--json]");
+    console.error("Usage: chat read <channel> [--last N] [--since T] [--search Q] [--text]");
     process.exit(1);
   }
 
@@ -221,14 +296,15 @@ async function cmdRead(args: string[]) {
   }
 
   const db = openDb(chatDir);
-  const opts: { last?: number; since?: string; search?: string } = {};
+  const opts: { last?: number; since?: string; search?: string; mention?: string } = {};
 
   if (flags.last) opts.last = parseInt(flags.last as string);
   if (flags.since) opts.since = parseSince(flags.since as string);
   if (flags.search) opts.search = flags.search as string;
+  if (flags.mention) opts.mention = flags.mention as string;
 
   // Default to last 50 if no filters
-  if (!opts.last && !opts.since && !opts.search) {
+  if (!opts.last && !opts.since && !opts.search && !opts.mention) {
     opts.last = 50;
   }
 
@@ -236,21 +312,25 @@ async function cmdRead(args: string[]) {
   db.close();
 
   if (msgs.length === 0) {
-    console.log(`No messages in #${channel}`);
+    if (flags.text) {
+      console.log(`No messages in #${channel}`);
+    } else {
+      console.log("[]");
+    }
     return;
   }
 
-  if (flags.json) {
-    console.log(JSON.stringify(msgs, null, 2));
+  if (flags.text) {
+    console.log(`#${channel}`);
+    for (const msg of msgs) {
+      const time = formatTime(msg.id);
+      const replyTag = msg.reply_to ? ` [reply:${msg.reply_to.slice(-6)}]` : "";
+      console.log(`[${time}] ${msg.author}${replyTag}: ${msg.content}`);
+    }
     return;
   }
 
-  console.log(`#${channel}`);
-  for (const msg of msgs) {
-    const time = formatTime(msg.id);
-    const replyTag = msg.reply_to ? ` [reply:${msg.reply_to.slice(-6)}]` : "";
-    console.log(`[${time}] ${msg.author}${replyTag}: ${msg.content}`);
-  }
+  console.log(JSON.stringify(msgs.map(stripNulls), null, 2));
 }
 
 async function cmdChannels(args: string[]) {
@@ -266,20 +346,19 @@ async function cmdChannels(args: string[]) {
   const channels = getChannels(db);
   db.close();
 
-  if (flags.json) {
-    console.log(JSON.stringify(channels, null, 2));
+  if (flags.text) {
+    if (channels.length === 0) {
+      console.log("No channels.");
+      return;
+    }
+    for (const ch of channels) {
+      const desc = ch.description ? ` - ${ch.description}` : "";
+      console.log(`  #${ch.name}${desc}`);
+    }
     return;
   }
 
-  if (channels.length === 0) {
-    console.log("No channels.");
-    return;
-  }
-
-  for (const ch of channels) {
-    const desc = ch.description ? ` - ${ch.description}` : "";
-    console.log(`  #${ch.name}${desc}`);
-  }
+  console.log(JSON.stringify(channels, null, 2));
 }
 
 async function cmdChannelCreate(args: string[]) {
@@ -314,56 +393,96 @@ async function cmdChannelCreate(args: string[]) {
   console.log(`Channel created: #${name}`);
 }
 
-async function cmdWatch(args: string[]) {
+async function cmdUnread(args: string[]) {
+  const { flags } = parseArgs(args);
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
-  const { positional } = parseArgs(args);
-  const channelFilter = positional[0] || null;
 
-  const port = config.port || 4321;
-  const wsUrl = config.upstream
-    ? config.upstream.replace(/^http/, "ws") + "/ws"
-    : `ws://localhost:${port}/ws`;
-
-  console.log(`Watching${channelFilter ? ` #${channelFilter}` : ""} (${config.name})`);
-  console.log("Press Ctrl+C to stop.\n");
-
-  let ws: WebSocket;
-  let closed = false;
-
-  function connect() {
-    ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {};
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data as string);
-        if (data.type === "msg") {
-          if (channelFilter && data.channel !== channelFilter) return;
-          const time = formatTime(data.id);
-          const replyTag = data.reply_to ? ` [reply:${data.reply_to.slice(-6)}]` : "";
-          console.log(`[${time}] #${data.channel} ${data.author}${replyTag}: ${data.content}`);
-        }
-      } catch (e) {
-        console.error("Watch message error:", e);
-      }
-    };
-
-    ws.onclose = () => {
-      if (!closed) {
-        setTimeout(connect, 3000);
-      }
-    };
-
-    ws.onerror = (e) => {
-      console.error("Watch WebSocket error:", e);
-    };
+  // Sync if member
+  if (config.upstream) {
+    await sync(chatDir);
   }
 
-  connect();
+  const cursor = readReadCursor(chatDir);
+  const db = openDb(chatDir);
+  const msgs = getUnreadMessages(db, cursor);
+  db.close();
 
-  await new Promise(() => {});
+  if (msgs.length === 0) {
+    if (flags.text) {
+      console.log("No unread messages.");
+    } else {
+      console.log(JSON.stringify({ unread: 0, messages: [] }));
+    }
+    return;
+  }
+
+  // Update read cursor to latest message
+  const newCursor = msgs[msgs.length - 1]!.id;
+  if (!flags["peek"]) {
+    writeReadCursor(chatDir, newCursor);
+  }
+
+  if (flags.text) {
+    // Group by channel
+    const grouped = new Map<string, typeof msgs>();
+    for (const msg of msgs) {
+      if (!grouped.has(msg.channel)) grouped.set(msg.channel, []);
+      grouped.get(msg.channel)!.push(msg);
+    }
+
+    console.log(`${msgs.length} unread messages:`);
+    for (const [channel, channelMsgs] of grouped) {
+      console.log(`\n#${channel} (${channelMsgs.length})`);
+      for (const msg of channelMsgs) {
+        const time = formatTime(msg.id);
+        const replyTag = msg.reply_to ? ` [reply:${msg.reply_to.slice(-6)}]` : "";
+        console.log(`  [${time}] ${msg.author}${replyTag}: ${msg.content}`);
+      }
+    }
+    return;
+  }
+
+  console.log(JSON.stringify({ unread: msgs.length, messages: msgs.map(stripNulls) }, null, 2));
+}
+
+async function cmdThread(args: string[]) {
+  const { positional, flags } = parseArgs(args);
+  const messageId = positional[0];
+
+  if (!messageId) {
+    console.error("Usage: chat thread <message-id> [--text]");
+    process.exit(1);
+  }
+
+  const chatDir = requireChatDir();
+  const db = openDb(chatDir);
+  const { root, replies } = getThread(db, messageId);
+  db.close();
+
+  if (!root) {
+    console.error(`Message not found: ${messageId}`);
+    process.exit(1);
+  }
+
+  if (flags.text) {
+    const time = formatTime(root.id);
+    console.log(`Thread: ${root.id}`);
+    console.log(`[${time}] ${root.author}: ${root.content}`);
+
+    if (replies.length === 0) {
+      console.log("\n  No replies.");
+    } else {
+      console.log(`\n  ${replies.length} replies:`);
+      for (const reply of replies) {
+        const rt = formatTime(reply.id);
+        console.log(`  [${rt}] ${reply.author}: ${reply.content}`);
+      }
+    }
+    return;
+  }
+
+  console.log(JSON.stringify({ root: stripNulls(root), replies: replies.map(stripNulls) }, null, 2));
 }
 
 async function cmdStatus() {
@@ -397,22 +516,32 @@ Commands:
   join <url>                      Join an existing chat
   serve [--port N]                Start server with public URL (owner only)
     --no-tunnel                   Skip tunnel (local only)
+    --tunnel-name <name>          Use a named tunnel for fixed URL (requires Cloudflare login)
+    --tunnel-hostname <host>      Hostname for named tunnel (e.g. chat.example.com)
     --standby                     Monitor primary; auto-takeover if it goes down
   sync                            Pull latest from upstream
 
   send <channel> <message>        Send a message
     --agent                       Send as AI agent
+    --agent-name <name>           Send as named agent (e.g. --agent-name Opus)
     --reply-to <id>               Reply to a message
-  read <channel>                  Read messages (local DB)
+  read <channel>                  Read messages (default: JSON output)
     --last N                      Last N messages (default: 50)
     --since <time>                Since time (e.g. 1h, 30m, 2d, or ISO)
     --search <query>              Search messages
+    --mention <name>              Filter messages mentioning @name
     --sync                        Sync from upstream before reading
-    --json                        Output as JSON
+    --text                        Output as human-readable text
 
-  watch [channel]                  Watch messages in real-time
+  unread [--peek]                  Show unread messages (default: JSON output)
+    --peek                        Don't mark messages as read
+    --text                        Output as human-readable text
 
-  channels [--sync]                List channels
+  thread <message-id>              View a message thread (default: JSON output)
+    --text                        Output as human-readable text
+
+  channels [--sync]                List channels (default: JSON output)
+    --text                        Output as human-readable text
   channel:create <name> [desc]    Create a channel
   status                          Show chat info
 
@@ -434,7 +563,8 @@ switch (cmd) {
   case "read":           await cmdRead(args); break;
   case "channels":       await cmdChannels(args); break;
   case "channel:create": await cmdChannelCreate(args); break;
-  case "watch":          await cmdWatch(args); break;
+  case "thread":         await cmdThread(args); break;
+  case "unread":         await cmdUnread(args); break;
   case "status":         await cmdStatus(); break;
   case "help": case "--help": case "-h": case undefined:
     showHelp(); break;

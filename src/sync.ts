@@ -1,4 +1,4 @@
-import { openDb, insertMessages, insertMessage, ensureChannel, generateId, type Message } from "./db";
+import { openDb, insertMessages, insertMessage, ensureChannel, ensureMember, generateId, type Message } from "./db";
 import { readConfig, readSyncCursor, writeSyncCursor, type ChatConfig } from "./config";
 
 // upstreamとbackup_ownersを順番に返す（重複除外）
@@ -63,7 +63,20 @@ export async function sync(chatDir: string): Promise<{ newMessages: number; newC
   throw lastError;
 }
 
-export async function sendToUpstream(chatDir: string, channel: string, author: string, content: string, replyTo?: string): Promise<void> {
+async function registerMemberToServer(url: string, name: string): Promise<void> {
+  try {
+    await fetch(`${url}/api/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    // 失敗しても送信処理は続ける
+  }
+}
+
+export async function sendToUpstream(chatDir: string, channel: string, author: string, content: string, replyTo?: string, metadata?: string): Promise<void> {
   const config = readConfig(chatDir);
   const urls = getUpstreamUrls(config);
 
@@ -72,10 +85,11 @@ export async function sendToUpstream(chatDir: string, channel: string, author: s
     let lastError: Error = new Error("All upstreams failed");
     for (const url of urls) {
       try {
+        await registerMemberToServer(url, author);
         const res = await fetch(`${url}/api/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channel, author, content, reply_to: replyTo }),
+          body: JSON.stringify({ channel, author, content, reply_to: replyTo, metadata }),
           signal: AbortSignal.timeout(5000),
         });
         if (res.ok) {
@@ -98,7 +112,7 @@ export async function sendToUpstream(chatDir: string, channel: string, author: s
       const res = await fetch(`http://localhost:${port}/api/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel, author, content, reply_to: replyTo }),
+        body: JSON.stringify({ channel, author, content, reply_to: replyTo, metadata }),
       });
       if (res.ok) return;
     } catch {
@@ -113,7 +127,9 @@ export async function sendToUpstream(chatDir: string, channel: string, author: s
       author,
       content,
       reply_to: replyTo ?? null,
+      metadata: metadata ?? null,
     });
+    ensureMember(db, author);
     db.close();
   }
 }

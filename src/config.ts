@@ -8,6 +8,8 @@ export interface ChatConfig {
   port?: number;
   upstream?: string;
   backup_owners?: string[];  // バックアップOwnerのサーバーURLリスト（順番に試す）
+  tunnel_name?: string;      // Named tunnel名（固定URL用）
+  tunnel_hostname?: string;  // 固定トンネルのホスト名（例: myapp.example.com）
   created_at: string;
 }
 
@@ -47,4 +49,14 @@ export function readSyncCursor(chatDir: string): string {
 
 export function writeSyncCursor(chatDir: string, cursor: string): void {
   writeFileSync(join(chatDir, ".sync"), cursor);
+}
+
+export function readReadCursor(chatDir: string): string {
+  const p = join(chatDir, ".read_cursor");
+  if (!existsSync(p)) return "";
+  return readFileSync(p, "utf-8").trim();
+}
+
+export function writeReadCursor(chatDir: string, cursor: string): void {
+  writeFileSync(join(chatDir, ".read_cursor"), cursor);
 }

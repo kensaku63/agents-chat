@@ -61,7 +61,22 @@
       letter-spacing: 0.05em;
       color: var(--text-muted);
       font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
+
+    #add-channel-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+    }
+
+    #add-channel-btn:hover { color: var(--sidebar-text); }
 
     #channel-list { flex: 1; overflow-y: auto; }
 
@@ -83,6 +98,36 @@
     }
 
     .channel-item::before { content: '# '; color: var(--text-muted); }
+
+    #identity-bar {
+      font-size: 11px;
+      padding: 10px 20px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #identity-label {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--sidebar-text);
+    }
+
+    #identity-change-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 3px;
+      color: var(--text-muted);
+      font-size: 10px;
+      padding: 2px 6px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #identity-change-btn:hover { border-color: rgba(255,255,255,0.4); color: var(--sidebar-text); }
 
     #status-bar {
       font-size: 11px;
@@ -205,6 +250,62 @@
       word-break: break-word;
     }
 
+    .mention {
+      color: var(--accent);
+      font-weight: 600;
+      background: var(--accent-light);
+      border-radius: 3px;
+      padding: 0 2px;
+    }
+
+    .mention.me {
+      background: #fef3c7;
+      color: #b45309;
+    }
+
+    #mention-popup {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 4px;
+      z-index: 10;
+    }
+
+    #mention-popup.visible { display: block; }
+
+    .mention-item {
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mention-item:hover, .mention-item.selected { background: var(--accent-light); }
+
+    .mention-item-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      background: var(--human-avatar);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
     .msg-actions { opacity: 0; transition: opacity 0.1s; margin-top: 2px; }
     .message:hover .msg-actions { opacity: 1; }
 
@@ -258,7 +359,7 @@
 
     .cancel-reply:hover { color: #666; }
 
-    #input-row { display: flex; gap: 8px; }
+    #input-row { display: flex; gap: 8px; position: relative; align-items: flex-end; }
 
     #message-input {
       flex: 1;
@@ -268,6 +369,11 @@
       font-size: 14px;
       outline: none;
       font-family: inherit;
+      resize: none;
+      min-height: 40px;
+      max-height: 160px;
+      overflow-y: auto;
+      line-height: 1.4;
     }
 
     #message-input:focus {
@@ -297,8 +403,16 @@
         <div id="chat-name">Loading...</div>
         <div id="chat-owner"></div>
       </div>
-      <div id="channels-header">Channels</div>
+      <div id="channels-header">
+        <span>Channels</span>
+        <button id="add-channel-btn" title="チャンネルを追加">+</button>
+      </div>
       <div id="channel-list"></div>
+      <div id="identity-bar">
+        <span>&#x1F464;</span>
+        <span id="identity-label"></span>
+        <button id="identity-change-btn">変更</button>
+      </div>
       <div id="status-bar">
         <span class="status-dot connecting"></span>
         <span id="status-text">connecting...</span>
@@ -313,7 +427,8 @@
           <span class="cancel-reply" id="cancel-reply-btn"></span>
         </div>
         <div id="input-row">
-          <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+          <div id="mention-popup"></div>
+          <textarea id="message-input" placeholder="Type a message... (@名前 でメンション, Shift+Enter で改行)" rows="1" autocomplete="off"></textarea>
           <button id="send-btn">Send</button>
         </div>
       </div>
@@ -327,9 +442,12 @@
       identity: '',
       channels: [],
       messages: [],
+      members: [],
       currentChannel: 'general',
       replyTo: null,
       ws: null,
+      mentionQuery: null,
+      mentionSelectedIdx: 0,
     };
 
     // --- Helpers ---
@@ -361,9 +479,31 @@
              String(d.getMinutes()).padStart(2,'0');
     }
 
-    function isAgent(author) { return author.startsWith('agent@'); }
-    function getInitials(author) { return author.replace('agent@','').slice(0,2).toUpperCase(); }
-    function getDisplayName(author) { return author.replace('agent@',''); }
+    function isAgent(author) { return author.startsWith('agent@') || author.startsWith('agent:'); }
+    function getInitials(author) {
+      var name = getDisplayName(author);
+      return name.slice(0, 2).toUpperCase();
+    }
+    function getDisplayName(author) {
+      // agent:Name@identity → Name
+      if (author.startsWith('agent:')) {
+        var rest = author.slice(6);
+        var at = rest.indexOf('@');
+        return at >= 0 ? rest.slice(0, at) : rest;
+      }
+      // agent@identity → identity
+      if (author.startsWith('agent@')) return author.slice(6);
+      return author;
+    }
+    function getAgentLabel(author) {
+      // agent:Name@identity → "AGENT:Name"
+      if (author.startsWith('agent:')) {
+        var rest = author.slice(6);
+        var at = rest.indexOf('@');
+        return at >= 0 ? rest.slice(0, at) : rest;
+      }
+      return 'AGENT';
+    }
 
     function findMessage(id) {
       for (var i = 0; i < state.messages.length; i++) {
@@ -379,9 +519,19 @@
       var data = await res.json();
       state.chatName = data.name;
       state.owner = data.owner;
-      state.identity = data.owner;
+
+      // identity は localStorage から読み込む。なければ入力させる
+      var saved = localStorage.getItem('agents-chat-identity');
+      if (!saved) {
+        saved = prompt('あなたの名前を入力してください（チャットでの表示名）:') || '';
+        saved = saved.trim() || 'anonymous';
+        localStorage.setItem('agents-chat-identity', saved);
+      }
+      state.identity = saved;
+
       document.getElementById('chat-name').textContent = data.name;
       document.getElementById('chat-owner').textContent = 'owner: ' + data.owner;
+      document.getElementById('identity-label').textContent = saved;
     }
 
     async function fetchChannels() {
@@ -389,6 +539,20 @@
       var data = await res.json();
       state.channels = data.channels;
       renderChannels();
+    }
+
+    async function fetchMembers() {
+      var res = await fetch('/api/members');
+      var data = await res.json();
+      state.members = data.members.map(function(m) { return m.name; });
+    }
+
+    async function registerMember(name) {
+      await fetch('/api/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name }),
+      });
     }
 
     async function fetchMessages() {
@@ -411,6 +575,7 @@
       if (state.replyTo) body.reply_to = state.replyTo;
 
       input.value = '';
+      input.style.height = 'auto';
       cancelReply();
 
       await fetch('/api/messages', {
@@ -433,8 +598,19 @@
 
       ws.onmessage = function(e) {
         var data = JSON.parse(e.data);
+        if (data.type === 'channel') {
+          fetchChannels();
+        }
+        if (data.type === 'members') {
+          state.members = data.members;
+        }
         if (data.type === 'msg') {
           if (state.messages.some(function(m) { return m.id === data.id; })) return;
+          // Re-fetch channels if message is in an unknown channel
+          var knownChannels = state.channels.map(function(c) { return c.name; });
+          if (knownChannels.indexOf(data.channel) === -1) {
+            fetchChannels();
+          }
           state.messages.push(data);
           if (data.channel === state.currentChannel) {
             var wasAtBottom = isScrolledToBottom();
@@ -507,13 +683,20 @@
         el('span', { className: 'msg-author' }, [getDisplayName(msg.author)]),
       ];
       if (agent) {
-        headerChildren.push(el('span', { className: 'msg-badge' }, ['AGENT']));
+        headerChildren.push(el('span', { className: 'msg-badge' }, [getAgentLabel(msg.author)]));
       }
       headerChildren.push(el('span', { className: 'msg-time' }, [formatTime(msg.id)]));
       var header = el('div', { className: 'msg-header' }, headerChildren);
 
-      // Content
-      var content = el('div', { className: 'msg-content' }, [msg.content]);
+      // Content（@メンションをハイライト）
+      var content = el('div', { className: 'msg-content' });
+      content.innerHTML = msg.content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(
+        /@([\w\-\.]+)/g,
+        function(match, name) {
+          var isMe = name === state.identity || name === state.identity.replace('agent@', '');
+          return '<span class="mention' + (isMe ? ' me' : '') + '">' + match + '</span>';
+        }
+      );
 
       // Actions
       var replyBtn = el('button', { 'data-reply-btn': msg.id }, ['Reply']);
@@ -610,19 +793,142 @@
     document.getElementById('cancel-reply-btn').textContent = '\u00D7';
     document.getElementById('cancel-reply-btn').addEventListener('click', cancelReply);
 
+    // --- @メンション オートコンプリート ---
+
+    function getMentionCandidates(query) {
+      var q = query.toLowerCase();
+      return state.members.filter(function(m) {
+        return m.toLowerCase().startsWith(q);
+      }).slice(0, 8);
+    }
+
+    function showMentionPopup(candidates) {
+      var popup = document.getElementById('mention-popup');
+      while (popup.firstChild) popup.removeChild(popup.firstChild);
+
+      if (candidates.length === 0) {
+        hideMentionPopup();
+        return;
+      }
+
+      candidates.forEach(function(name, i) {
+        var item = el('div', { className: 'mention-item' + (i === state.mentionSelectedIdx ? ' selected' : '') }, [
+          el('div', { className: 'mention-item-avatar' }, [name.slice(0, 2).toUpperCase()]),
+          el('span', {}, ['@' + name]),
+        ]);
+        item.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          insertMention(name);
+        });
+        popup.appendChild(item);
+      });
+
+      popup.classList.add('visible');
+    }
+
+    function hideMentionPopup() {
+      document.getElementById('mention-popup').classList.remove('visible');
+      state.mentionQuery = null;
+      state.mentionSelectedIdx = 0;
+    }
+
+    function insertMention(name) {
+      var input = document.getElementById('message-input');
+      var val = input.value;
+      var atPos = val.lastIndexOf('@');
+      input.value = val.slice(0, atPos) + '@' + name + ' ';
+      hideMentionPopup();
+      input.focus();
+    }
+
+    document.getElementById('message-input').addEventListener('input', function() {
+      // Auto-resize textarea
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+
+      var val = this.value;
+      var atPos = val.lastIndexOf('@');
+      if (atPos === -1) { hideMentionPopup(); return; }
+
+      var before = val[atPos - 1];
+      if (atPos > 0 && before !== ' ' && before !== '\n') { hideMentionPopup(); return; }
+
+      var query = val.slice(atPos + 1);
+      if (query.includes(' ')) { hideMentionPopup(); return; }
+
+      state.mentionQuery = query;
+      state.mentionSelectedIdx = 0;
+      showMentionPopup(getMentionCandidates(query));
+    });
+
     document.getElementById('message-input').addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        if (document.getElementById('mention-popup').classList.contains('visible')) {
+          e.preventDefault();
+          var candidates = getMentionCandidates(state.mentionQuery || '');
+          if (candidates[state.mentionSelectedIdx]) {
+            insertMention(candidates[state.mentionSelectedIdx]);
+          }
+          return;
+        }
         e.preventDefault();
         sendMessage();
+        return;
+      }
+
+      if (document.getElementById('mention-popup').classList.contains('visible')) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          var cands = getMentionCandidates(state.mentionQuery || '');
+          state.mentionSelectedIdx = Math.min(state.mentionSelectedIdx + 1, cands.length - 1);
+          showMentionPopup(cands);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          state.mentionSelectedIdx = Math.max(state.mentionSelectedIdx - 1, 0);
+          showMentionPopup(getMentionCandidates(state.mentionQuery || ''));
+        } else if (e.key === 'Escape') {
+          hideMentionPopup();
+        }
       }
     });
 
     document.getElementById('send-btn').addEventListener('click', sendMessage);
 
+    document.getElementById('add-channel-btn').addEventListener('click', async function() {
+      var name = prompt('チャンネル名を入力してください:');
+      if (!name) return;
+      name = name.trim().toLowerCase().replace(/\s+/g, '-');
+      if (!name) return;
+
+      var desc = prompt('説明（省略可）:') || '';
+
+      await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, description: desc }),
+      });
+
+      await fetchChannels();
+      switchChannel(name);
+    });
+
+    document.getElementById('identity-change-btn').addEventListener('click', async function() {
+      var current = state.identity;
+      var newName = prompt('新しい名前を入力してください:', current);
+      if (newName === null) return;
+      newName = newName.trim() || current;
+      state.identity = newName;
+      localStorage.setItem('agents-chat-identity', newName);
+      document.getElementById('identity-label').textContent = newName;
+      await registerMember(newName);
+    });
+
     // --- Init ---
 
     async function init() {
       await fetchInfo();
+      await registerMember(state.identity);
+      await fetchMembers();
       await fetchChannels();
       await fetchMessages();
       connectWS();
