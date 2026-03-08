@@ -4,7 +4,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { findChatDir, requireChatDir, readConfig, writeConfig, type ChatConfig } from "./src/config";
 import { openDb, createChannel, getChannels, queryMessages, idToTime } from "./src/db";
-import { sync, sendToUpstream, connectRealtime } from "./src/sync";
+import { sync, sendToUpstream } from "./src/sync";
 import { startServer, startTunnel, startStandbyMode, syncFromBackups } from "./src/server";
 
 // --- Arg parsing ---
@@ -59,9 +59,8 @@ async function cmdInit(args: string[]) {
   const { positional, flags } = parseArgs(args);
   const name = positional[0] || basename(process.cwd());
   const identity = (flags.identity as string) || userInfo().username;
-  const targetDir = positional[0] ? resolve(positional[0]) : process.cwd();
 
-  const chatDir = join(targetDir, ".chat");
+  const chatDir = join(process.cwd(), ".chat");
   if (existsSync(chatDir)) {
     console.error(`Error: ${chatDir} already exists.`);
     process.exit(1);
@@ -87,9 +86,6 @@ async function cmdInit(args: string[]) {
   console.log(`  Role:      owner`);
   console.log("");
   console.log("Next steps:");
-  if (targetDir !== process.cwd()) {
-    console.log(`  cd ${positional[0]}`);
-  }
   console.log("  chat serve          # Start sharing");
   console.log("  chat send general 'Hello!'");
 }
@@ -112,8 +108,7 @@ async function cmdJoin(args: string[]) {
   }
   const info = await infoRes.json() as { name: string; owner: string; backup_owners?: string[] };
 
-  const targetDir = resolve(flags.dir as string || info.name);
-  const chatDir = join(targetDir, ".chat");
+  const chatDir = join(process.cwd(), ".chat");
 
   if (existsSync(chatDir)) {
     console.error(`Error: ${chatDir} already exists.`);
@@ -145,32 +140,31 @@ async function cmdJoin(args: string[]) {
 async function cmdServe(args: string[]) {
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
+
+  if (config.upstream) {
+    console.error("Error: 'serve' is for owners only. Use 'chat watch' for real-time messages.");
+    process.exit(1);
+  }
+
   const { flags } = parseArgs(args);
   const port = parseInt(flags.port as string) || config.port || 4321;
 
   if (flags.standby) {
     // スタンバイモード: Primaryを監視し、落ちたら自動でサーバーを引き継ぐ
     await startStandbyMode(chatDir, port);
-  } else if (config.upstream) {
-    // Member: initial sync, then realtime WebSocket connection
-    const result = await sync(chatDir);
-    if (result.newMessages > 0 || result.newChannels > 0) {
-      console.log(`Synced: +${result.newMessages} messages, +${result.newChannels} channels`);
-    }
-    connectRealtime(chatDir);
-    console.log(`Listening for messages from ${config.upstream}`);
   } else {
     // Owner: バックアップから差分マージ後にサーバー起動
     await syncFromBackups(chatDir);
     startServer(chatDir, port);
+  }
 
-    if (flags.tunnel) {
-      console.log("\nStarting tunnel...");
-      const tunnelUrl = await startTunnel(port);
-      console.log(`\n  Public: ${tunnelUrl}`);
-      console.log(`\n  Share with team:`);
-      console.log(`    chat join ${tunnelUrl}`);
-    }
+  const useTunnel = !flags["no-tunnel"];
+  if (useTunnel) {
+    console.log("\nStarting tunnel...");
+    const tunnelUrl = await startTunnel(port);
+    console.log(`\n  Public: ${tunnelUrl}`);
+    console.log(`\n  Share with team:`);
+    console.log(`    chat join ${tunnelUrl}`);
   }
 }
 
@@ -221,8 +215,8 @@ async function cmdRead(args: string[]) {
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
 
-  // Sync before reading (if member)
-  if (config.upstream) {
+  // Sync only when explicitly requested
+  if (flags.sync && config.upstream) {
     await sync(chatDir);
   }
 
@@ -262,13 +256,12 @@ async function cmdRead(args: string[]) {
 async function cmdChannels(args: string[]) {
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
+  const { flags } = parseArgs(args);
 
-  // Sync if member
-  if (config.upstream) {
+  // Sync only when explicitly requested
+  if (flags.sync && config.upstream) {
     await sync(chatDir);
   }
-
-  const { flags } = parseArgs(args);
   const db = openDb(chatDir);
   const channels = getChannels(db);
   db.close();
@@ -352,7 +345,9 @@ async function cmdWatch(args: string[]) {
           const replyTag = data.reply_to ? ` [reply:${data.reply_to.slice(-6)}]` : "";
           console.log(`[${time}] #${data.channel} ${data.author}${replyTag}: ${data.content}`);
         }
-      } catch {}
+      } catch (e) {
+        console.error("Watch message error:", e);
+      }
     };
 
     ws.onclose = () => {
@@ -361,7 +356,9 @@ async function cmdWatch(args: string[]) {
       }
     };
 
-    ws.onerror = () => {};
+    ws.onerror = (e) => {
+      console.error("Watch WebSocket error:", e);
+    };
   }
 
   connect();
@@ -398,22 +395,24 @@ Usage: chat <command> [args]
 Commands:
   init [name]                     Create a new chat (you become the owner)
   join <url>                      Join an existing chat
-  serve [--port N]                Start server (owner) / realtime listener (member)
+  serve [--port N]                Start server with public URL (owner only)
+    --no-tunnel                   Skip tunnel (local only)
     --standby                     Monitor primary; auto-takeover if it goes down
   sync                            Pull latest from upstream
 
   send <channel> <message>        Send a message
     --agent                       Send as AI agent
     --reply-to <id>               Reply to a message
-  read <channel>                  Read messages
+  read <channel>                  Read messages (local DB)
     --last N                      Last N messages (default: 50)
     --since <time>                Since time (e.g. 1h, 30m, 2d, or ISO)
     --search <query>              Search messages
+    --sync                        Sync from upstream before reading
     --json                        Output as JSON
 
   watch [channel]                  Watch messages in real-time
 
-  channels                        List channels
+  channels [--sync]                List channels
   channel:create <name> [desc]    Create a channel
   status                          Show chat info
 

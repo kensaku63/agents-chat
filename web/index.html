@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>agents-chat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --sidebar-bg: #1e1e2e;
+      --sidebar-text: #cdd6f4;
+      --sidebar-active: #313244;
+      --sidebar-hover: #2a2a3c;
+      --border: #e6e6e6;
+      --text: #1e1e2e;
+      --text-muted: #6c7086;
+      --accent: #7c3aed;
+      --accent-hover: #6d28d9;
+      --accent-light: #ede9fe;
+      --agent-avatar: #7c3aed;
+      --human-avatar: #059669;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      color: var(--text);
+    }
+
+    #app { display: flex; height: 100vh; }
+
+    /* Sidebar */
+    #sidebar {
+      width: 240px;
+      background: var(--sidebar-bg);
+      color: var(--sidebar-text);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    #chat-info {
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    #chat-name { font-size: 16px; font-weight: 700; color: #fff; }
+
+    #chat-owner {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    #channels-header {
+      padding: 12px 20px 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    #channel-list { flex: 1; overflow-y: auto; }
+
+    .channel-item {
+      padding: 6px 20px;
+      cursor: pointer;
+      font-size: 14px;
+      border-radius: 4px;
+      margin: 1px 8px;
+      transition: background 0.1s;
+    }
+
+    .channel-item:hover { background: var(--sidebar-hover); }
+
+    .channel-item.active {
+      background: var(--sidebar-active);
+      color: #fff;
+      font-weight: 500;
+    }
+
+    .channel-item::before { content: '# '; color: var(--text-muted); }
+
+    #status-bar {
+      font-size: 11px;
+      padding: 10px 20px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+
+    .status-dot.connected { background: #22c55e; }
+    .status-dot.disconnected { background: #ef4444; }
+    .status-dot.connecting { background: #f59e0b; }
+
+    /* Main */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    #channel-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    #channel-header::before { content: '# '; color: var(--text-muted); }
+
+    #messages { flex: 1; overflow-y: auto; padding: 8px 0; }
+
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .message {
+      display: flex;
+      gap: 12px;
+      padding: 8px 20px;
+      transition: background 0.2s;
+    }
+
+    .message:hover { background: #f8f8fa; }
+    .message.highlight { background: #fef3c7; }
+
+    .msg-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 13px;
+      color: #fff;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .msg-avatar.agent { background: var(--agent-avatar); }
+    .msg-avatar.human { background: var(--human-avatar); }
+
+    .msg-body { flex: 1; min-width: 0; }
+
+    .msg-header {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 2px;
+    }
+
+    .msg-author { font-weight: 600; font-size: 14px; }
+
+    .msg-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 600;
+      background: var(--accent-light);
+      color: var(--accent);
+    }
+
+    .msg-time { font-size: 12px; color: var(--text-muted); }
+
+    .msg-reply-ref {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 3px 8px;
+      background: #f5f5f5;
+      border-left: 2px solid #ccc;
+      border-radius: 2px;
+      margin-bottom: 4px;
+      cursor: pointer;
+      max-width: 500px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .msg-reply-ref:hover { background: #eee; }
+
+    .msg-content {
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .msg-actions { opacity: 0; transition: opacity 0.1s; margin-top: 2px; }
+    .message:hover .msg-actions { opacity: 1; }
+
+    .msg-actions button {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .msg-actions button:hover { background: #f0f0f0; color: var(--text); }
+
+    /* Input */
+    #input-area {
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    #reply-preview {
+      display: none;
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 6px 10px;
+      margin-bottom: 8px;
+      background: #f5f5f5;
+      border-left: 2px solid var(--accent);
+      border-radius: 2px;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #reply-preview.visible { display: flex; }
+
+    #reply-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .cancel-reply {
+      cursor: pointer;
+      color: #999;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .cancel-reply:hover { color: #666; }
+
+    #input-row { display: flex; gap: 8px; }
+
+    #message-input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      font-family: inherit;
+    }
+
+    #message-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1);
+    }
+
+    #send-btn {
+      padding: 10px 20px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    #send-btn:hover { background: var(--accent-hover); }
+    #send-btn:active { transform: scale(0.98); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div id="chat-info">
+        <div id="chat-name">Loading...</div>
+        <div id="chat-owner"></div>
+      </div>
+      <div id="channels-header">Channels</div>
+      <div id="channel-list"></div>
+      <div id="status-bar">
+        <span class="status-dot connecting"></span>
+        <span id="status-text">connecting...</span>
+      </div>
+    </aside>
+    <main id="main">
+      <header id="channel-header">general</header>
+      <div id="messages"></div>
+      <div id="input-area">
+        <div id="reply-preview">
+          <span id="reply-text"></span>
+          <span class="cancel-reply" id="cancel-reply-btn"></span>
+        </div>
+        <div id="input-row">
+          <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+          <button id="send-btn">Send</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    var state = {
+      chatName: '',
+      owner: '',
+      identity: '',
+      channels: [],
+      messages: [],
+      currentChannel: 'general',
+      replyTo: null,
+      ws: null,
+    };
+
+    // --- Helpers ---
+
+    function el(tag, attrs, children) {
+      var e = document.createElement(tag);
+      if (attrs) {
+        Object.keys(attrs).forEach(function(k) {
+          if (k === 'className') e.className = attrs[k];
+          else if (k.indexOf('data-') === 0) e.setAttribute(k, attrs[k]);
+          else e[k] = attrs[k];
+        });
+      }
+      if (children) {
+        children.forEach(function(c) {
+          if (typeof c === 'string') e.appendChild(document.createTextNode(c));
+          else if (c) e.appendChild(c);
+        });
+      }
+      return e;
+    }
+
+    function formatTime(id) {
+      var ts = parseInt(id.split('_')[0], 36);
+      var d = new Date(ts);
+      return String(d.getMonth()+1).padStart(2,'0') + '/' +
+             String(d.getDate()).padStart(2,'0') + ' ' +
+             String(d.getHours()).padStart(2,'0') + ':' +
+             String(d.getMinutes()).padStart(2,'0');
+    }
+
+    function isAgent(author) { return author.startsWith('agent@'); }
+    function getInitials(author) { return author.replace('agent@','').slice(0,2).toUpperCase(); }
+    function getDisplayName(author) { return author.replace('agent@',''); }
+
+    function findMessage(id) {
+      for (var i = 0; i < state.messages.length; i++) {
+        if (state.messages[i].id === id) return state.messages[i];
+      }
+      return null;
+    }
+
+    // --- API ---
+
+    async function fetchInfo() {
+      var res = await fetch('/api/info');
+      var data = await res.json();
+      state.chatName = data.name;
+      state.owner = data.owner;
+      state.identity = data.owner;
+      document.getElementById('chat-name').textContent = data.name;
+      document.getElementById('chat-owner').textContent = 'owner: ' + data.owner;
+    }
+
+    async function fetchChannels() {
+      var res = await fetch('/api/channels');
+      var data = await res.json();
+      state.channels = data.channels;
+      renderChannels();
+    }
+
+    async function fetchMessages() {
+      var res = await fetch('/api/sync');
+      var data = await res.json();
+      state.messages = data.messages;
+      renderMessages();
+    }
+
+    async function sendMessage() {
+      var input = document.getElementById('message-input');
+      var content = input.value.trim();
+      if (!content) return;
+
+      var body = {
+        channel: state.currentChannel,
+        author: state.identity,
+        content: content,
+      };
+      if (state.replyTo) body.reply_to = state.replyTo;
+
+      input.value = '';
+      cancelReply();
+
+      await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    // --- WebSocket ---
+
+    function connectWS() {
+      var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      var ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+      ws.onopen = function() {
+        state.ws = ws;
+        updateStatus('connected', 'connected');
+      };
+
+      ws.onmessage = function(e) {
+        var data = JSON.parse(e.data);
+        if (data.type === 'msg') {
+          if (state.messages.some(function(m) { return m.id === data.id; })) return;
+          state.messages.push(data);
+          if (data.channel === state.currentChannel) {
+            var wasAtBottom = isScrolledToBottom();
+            appendMessage(data);
+            if (wasAtBottom) scrollToBottom();
+          }
+        }
+      };
+
+      ws.onclose = function() {
+        state.ws = null;
+        updateStatus('disconnected', 'disconnected');
+        setTimeout(connectWS, 3000);
+      };
+
+      ws.onerror = function() {
+        updateStatus('disconnected', 'error');
+      };
+    }
+
+    function updateStatus(cls, text) {
+      document.querySelector('.status-dot').className = 'status-dot ' + cls;
+      document.getElementById('status-text').textContent = text;
+    }
+
+    // --- Rendering ---
+
+    function renderChannels() {
+      var list = document.getElementById('channel-list');
+      while (list.firstChild) list.removeChild(list.firstChild);
+      state.channels.forEach(function(ch) {
+        var item = el('div', {
+          className: 'channel-item' + (ch.name === state.currentChannel ? ' active' : ''),
+          textContent: ch.name,
+        });
+        item.addEventListener('click', function() { switchChannel(ch.name); });
+        list.appendChild(item);
+      });
+    }
+
+    function switchChannel(name) {
+      state.currentChannel = name;
+      document.getElementById('channel-header').textContent = name;
+      renderChannels();
+      renderMessages();
+      cancelReply();
+      document.getElementById('message-input').focus();
+    }
+
+    function createMessageEl(msg) {
+      var agent = isAgent(msg.author);
+
+      // Avatar
+      var avatar = el('div', { className: 'msg-avatar ' + (agent ? 'agent' : 'human') }, [
+        getInitials(msg.author)
+      ]);
+
+      // Reply reference
+      var replyRef = null;
+      if (msg.reply_to) {
+        var orig = findMessage(msg.reply_to);
+        var preview = orig
+          ? getDisplayName(orig.author) + ': ' + orig.content.slice(0, 60) + (orig.content.length > 60 ? '...' : '')
+          : 'reply:' + msg.reply_to.slice(-6);
+        replyRef = el('div', { className: 'msg-reply-ref', 'data-reply': msg.reply_to }, [preview]);
+      }
+
+      // Header
+      var headerChildren = [
+        el('span', { className: 'msg-author' }, [getDisplayName(msg.author)]),
+      ];
+      if (agent) {
+        headerChildren.push(el('span', { className: 'msg-badge' }, ['AGENT']));
+      }
+      headerChildren.push(el('span', { className: 'msg-time' }, [formatTime(msg.id)]));
+      var header = el('div', { className: 'msg-header' }, headerChildren);
+
+      // Content
+      var content = el('div', { className: 'msg-content' }, [msg.content]);
+
+      // Actions
+      var replyBtn = el('button', { 'data-reply-btn': msg.id }, ['Reply']);
+      var actions = el('div', { className: 'msg-actions' }, [replyBtn]);
+
+      // Body
+      var bodyChildren = [];
+      if (replyRef) bodyChildren.push(replyRef);
+      bodyChildren.push(header, content, actions);
+      var body = el('div', { className: 'msg-body' }, bodyChildren);
+
+      return el('div', { className: 'message', 'data-id': msg.id }, [avatar, body]);
+    }
+
+    function renderMessages() {
+      var container = document.getElementById('messages');
+      while (container.firstChild) container.removeChild(container.firstChild);
+
+      var channelMsgs = state.messages.filter(function(m) {
+        return m.channel === state.currentChannel;
+      });
+
+      if (channelMsgs.length === 0) {
+        container.appendChild(
+          el('div', { className: 'empty-state' }, ['No messages in #' + state.currentChannel])
+        );
+        return;
+      }
+
+      channelMsgs.forEach(function(msg) {
+        container.appendChild(createMessageEl(msg));
+      });
+      scrollToBottom();
+    }
+
+    function appendMessage(msg) {
+      var container = document.getElementById('messages');
+      var empty = container.querySelector('.empty-state');
+      if (empty) container.removeChild(empty);
+      container.appendChild(createMessageEl(msg));
+    }
+
+    function isScrolledToBottom() {
+      var c = document.getElementById('messages');
+      return c.scrollHeight - c.scrollTop - c.clientHeight < 40;
+    }
+
+    function scrollToBottom() {
+      var c = document.getElementById('messages');
+      c.scrollTop = c.scrollHeight;
+    }
+
+    function scrollToMessage(id) {
+      var msg = document.querySelector('[data-id="' + CSS.escape(id) + '"]');
+      if (msg) {
+        msg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        msg.classList.add('highlight');
+        setTimeout(function() { msg.classList.remove('highlight'); }, 2000);
+      }
+    }
+
+    // --- Reply ---
+
+    function startReply(id) {
+      var msg = findMessage(id);
+      if (!msg) return;
+      state.replyTo = id;
+      var text = getDisplayName(msg.author) + ': ' + msg.content.slice(0, 80) + (msg.content.length > 80 ? '...' : '');
+      document.getElementById('reply-text').textContent = text;
+      document.getElementById('reply-preview').classList.add('visible');
+      document.getElementById('message-input').focus();
+    }
+
+    function cancelReply() {
+      state.replyTo = null;
+      document.getElementById('reply-preview').classList.remove('visible');
+    }
+
+    // --- Event delegation ---
+
+    document.getElementById('messages').addEventListener('click', function(e) {
+      var replyBtn = e.target.closest('[data-reply-btn]');
+      if (replyBtn) {
+        startReply(replyBtn.getAttribute('data-reply-btn'));
+        return;
+      }
+      var replyRef = e.target.closest('[data-reply]');
+      if (replyRef) {
+        scrollToMessage(replyRef.getAttribute('data-reply'));
+        return;
+      }
+    });
+
+    document.getElementById('cancel-reply-btn').textContent = '\u00D7';
+    document.getElementById('cancel-reply-btn').addEventListener('click', cancelReply);
+
+    document.getElementById('message-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    document.getElementById('send-btn').addEventListener('click', sendMessage);
+
+    // --- Init ---
+
+    async function init() {
+      await fetchInfo();
+      await fetchChannels();
+      await fetchMessages();
+      connectWS();
+    }
+
+    init();
+  </script>
+</body>
+</html>
