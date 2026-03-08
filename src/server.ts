@@ -1,6 +1,6 @@
 import { networkInterfaces } from "node:os";
 import { openDb, getAllMessages, getMessagesSince, insertMessage, insertMessages, createChannel, ensureChannel, getChannels, generateId, ensureMember, getMembers, rebuildMembers, type Message } from "./db";
-import { readConfig, readSyncCursor } from "./config";
+import { readConfig, readSyncCursor, readChannelsMeta, writeChannelsMeta, readAgentsConfig, writeAgentsConfig } from "./config";
 import webHtml from "../web/index.html" with { type: "text" };
 
 function getLocalIp(): string {
@@ -39,7 +39,7 @@ export function startServer(chatDir: string, port: number) {
 
       const headers = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
         "Content-Type": "application/json",
       };
@@ -59,8 +59,50 @@ export function startServer(chatDir: string, port: number) {
 
       // GET /api/agents
       if (path === "/api/agents" && req.method === "GET") {
-        const freshConfig = readConfig(chatDir);
-        return Response.json({ agents: freshConfig.agents ?? [] }, { headers });
+        return Response.json({ agents: readAgentsConfig(chatDir) }, { headers });
+      }
+
+      // POST /api/agents
+      if (path === "/api/agents" && req.method === "POST") {
+        let body: { name: string; role?: string; description?: string; channels?: string[] };
+        try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
+        if (!body.name) return Response.json({ error: "name is required" }, { status: 400, headers });
+        const agents = readAgentsConfig(chatDir);
+        agents[body.name] = {
+          role: body.role || agents[body.name]?.role || "",
+          description: body.description || agents[body.name]?.description || "",
+          channels: body.channels || agents[body.name]?.channels || [],
+        };
+        writeAgentsConfig(chatDir, agents);
+        return Response.json({ ok: true }, { headers });
+      }
+
+      // DELETE /api/agents/:name
+      if (path.startsWith("/api/agents/") && req.method === "DELETE") {
+        const name = decodeURIComponent(path.slice("/api/agents/".length));
+        const agents = readAgentsConfig(chatDir);
+        delete agents[name];
+        writeAgentsConfig(chatDir, agents);
+        return Response.json({ ok: true }, { headers });
+      }
+
+      // GET /api/channels/meta
+      if (path === "/api/channels/meta" && req.method === "GET") {
+        return Response.json({ channels: readChannelsMeta(chatDir) }, { headers });
+      }
+
+      // POST /api/channels/meta
+      if (path === "/api/channels/meta" && req.method === "POST") {
+        let body: { name: string; description?: string; status?: string };
+        try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
+        if (!body.name) return Response.json({ error: "name is required" }, { status: 400, headers });
+        const channels = readChannelsMeta(chatDir);
+        channels[body.name] = {
+          description: body.description || channels[body.name]?.description || "",
+          status: (body.status as any) || channels[body.name]?.status || "active",
+        };
+        writeChannelsMeta(chatDir, channels);
+        return Response.json({ ok: true }, { headers });
       }
 
       // GET /api/context
@@ -68,10 +110,12 @@ export function startServer(chatDir: string, port: number) {
         const { existsSync: ex, readFileSync: rf } = require("node:fs");
         const { resolve: rs } = require("node:path");
         const chatMdPath = rs(chatDir, "..", "CHAT.md");
-        if (!ex(chatMdPath)) {
-          return Response.json({ content: null }, { headers });
-        }
-        return Response.json({ content: rf(chatMdPath, "utf-8") }, { headers });
+        const content = ex(chatMdPath) ? rf(chatMdPath, "utf-8") : null;
+        return Response.json({
+          content,
+          channels: readChannelsMeta(chatDir),
+          agents: readAgentsConfig(chatDir),
+        }, { headers });
       }
 
       // GET /api/members
