@@ -547,11 +547,13 @@
       state.members = data.members.map(function(m) { return m.name; });
     }
 
-    async function registerMember(name) {
+    async function registerMember(name, oldName) {
+      var body = { name: name };
+      if (oldName) body.old_name = oldName;
       await fetch('/api/members', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name }),
+        body: JSON.stringify(body),
       });
     }
 
@@ -920,7 +922,7 @@
       state.identity = newName;
       localStorage.setItem('agents-chat-identity', newName);
       document.getElementById('identity-label').textContent = newName;
-      await registerMember(newName);
+      await registerMember(newName, current);
     });
 
     // --- Init ---

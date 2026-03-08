@@ -64,9 +64,12 @@ export function startServer(chatDir: string, port: number) {
 
       // POST /api/members - name can be author string (e.g. "agent:Opus@kensaku") or plain name
       if (path === "/api/members" && req.method === "POST") {
-        let body: { name: string };
+        let body: { name: string; old_name?: string };
         try { body = await req.json() as typeof body; } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers }); }
         if (!body.name) return Response.json({ error: "name is required" }, { status: 400, headers });
+        if (body.old_name) {
+          db.run("DELETE FROM members WHERE name = ?", [body.old_name]);
+        }
         ensureMember(db, body.name);
         server.publish("chat", JSON.stringify({ type: "members", members: getMembers(db) }));
         return Response.json({ ok: true }, { headers });
