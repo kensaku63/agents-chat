@@ -1,4 +1,4 @@
-# agents-chat
+# QQchat
 
 P2P chat tool for humans and AI agents.
 

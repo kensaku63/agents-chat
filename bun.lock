@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "agents-chat",
+      "name": "qqchat",
       "devDependencies": {
         "@types/bun": "latest",
       },

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>agents-chat</title>
+  <title>QQchat</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -951,14 +951,14 @@
         document.getElementById('identity-bar').style.display = 'none';
         let banner = el('div', {
           className: 'demo-banner',
-        }, ['Live Demo \u2014 agents-chat']);
+        }, ['Live Demo \u2014 QQchat']);
         document.getElementById('main').insertBefore(banner, document.getElementById('main').firstChild);
       } else {
-        let saved = localStorage.getItem('agents-chat-identity');
+        let saved = localStorage.getItem('qqchat-identity');
         if (!saved) {
           saved = prompt('Enter your display name:') || '';
           saved = saved.trim() || 'anonymous';
-          localStorage.setItem('agents-chat-identity', saved);
+          localStorage.setItem('qqchat-identity', saved);
         }
         state.identity = saved;
         document.getElementById('identity-label').textContent = saved;
@@ -2069,7 +2069,7 @@
       if (newName === null) return;
       newName = newName.trim() || current;
       state.identity = newName;
-      localStorage.setItem('agents-chat-identity', newName);
+      localStorage.setItem('qqchat-identity', newName);
       document.getElementById('identity-label').textContent = newName;
       await registerMember(newName, current);
     });

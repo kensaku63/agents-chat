@@ -100,7 +100,7 @@ async function cmdInit(args: string[]) {
   // Create CHAT.md in project root
   const chatMdPath = join(process.cwd(), "CHAT.md");
   if (!existsSync(chatMdPath)) {
-    writeFileSync(chatMdPath, `# ${name}\n\nThis project uses [agents-chat](https://github.com/kensaku63/agents-chat) for team communication.\n\n## Getting Started\n\n- \`chat context\` — Read this file\n- \`chat agent list\` — See registered agents\n- \`chat unread\` — Check unread messages\n- \`chat send <channel> <message>\` — Send a message\n`);
+    writeFileSync(chatMdPath, `# ${name}\n\nThis project uses [QQchat](https://github.com/kensaku63/qqchat) for team communication.\n\n## Getting Started\n\n- \`chat context\` — Read this file\n- \`chat agent list\` — See registered agents\n- \`chat unread\` — Check unread messages\n- \`chat send <channel> <message>\` — Send a message\n`);
   }
 
   console.log(`Chat initialized: ${name}`);
@@ -1115,7 +1115,7 @@ async function cmdSummary(args: string[]) {
 // --- Help ---
 
 function showHelp() {
-  console.log(`agents-chat - P2P chat for humans and AI agents
+  console.log(`QQchat - P2P chat for humans and AI agents
 
 Usage: chat <command> [args]
 

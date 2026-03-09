@@ -1,5 +1,5 @@
 {
-  "name": "agents-chat",
+  "name": "qqchat",
   "version": "0.1.0",
   "module": "cli.ts",
   "type": "module",

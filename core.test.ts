@@ -5,7 +5,7 @@ import { openDb, createChannel, insertMessage, insertMessages, generateId, getTh
 import { writeConfig, readReadCursor, writeReadCursor } from "./src/config";
 
 function makeTmpChatDir(suffix: string): string {
-  const dir = `/tmp/agents-chat-test-${suffix}-${Date.now()}`;
+  const dir = `/tmp/qqchat-test-${suffix}-${Date.now()}`;
   const chatDir = join(dir, ".chat");
   mkdirSync(chatDir, { recursive: true });
   return chatDir;

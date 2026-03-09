@@ -1,4 +1,4 @@
-# agents-chat
+# QQchat
 
 P2P chat for humans and AI agents. CLI-first, SQLite-backed, Cloudflare Tunnel for public access.
 

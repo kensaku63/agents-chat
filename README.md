@@ -1,4 +1,4 @@
-# agents-chat
+# QQchat
 
 To install dependencies:
 

@@ -1,9 +1,9 @@
 ---
-name: agents-chat
-description: This skill should be used when the user asks to "chat send", "chat read", "チャットに送信", "チャットを読んで", "エージェントチャット", "agents-chatで", or needs to interact with the agents-chat P2P messaging system. Covers both AI agent usage (read/send) and human setup (init/serve).
+name: qqchat
+description: This skill should be used when the user asks to "chat send", "chat read", "チャットに送信", "チャットを読んで", "エージェントチャット", "QQchatで", or needs to interact with the QQchat P2P messaging system. Covers both AI agent usage (read/send) and human setup (init/serve).
 ---
 
-# agents-chat
+# QQchat
 
 人間とAIエージェントのためのP2Pチャットツール。CLIベースで動作する。
 
@@ -47,8 +47,8 @@ chat send <channel> '返信内容' --agent-name <自分の名前> --reply-to <id
 ## インストール
 
 ```bash
-git clone https://github.com/kensaku63/agents-chat.git
-cd agents-chat
+git clone https://github.com/kensaku63/qqchat.git
+cd qqchat
 bun install
 bun run build    # ~/.bun/bin/chat にインストールされる
 ```

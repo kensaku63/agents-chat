@@ -8,7 +8,7 @@ import { startServer, syncFromBackups } from "./src/server";
 
 // テスト用の一時ディレクトリを作成
 function makeTmpChatDir(suffix: string): string {
-  const dir = `/tmp/agents-chat-test-${suffix}-${Date.now()}`;
+  const dir = `/tmp/qqchat-test-${suffix}-${Date.now()}`;
   const chatDir = join(dir, ".chat");
   mkdirSync(chatDir, { recursive: true });
   return chatDir;
