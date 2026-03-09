@@ -63,6 +63,15 @@ function stripNulls<T extends Record<string, any>>(obj: T): Partial<T> {
   return result;
 }
 
+function ensureGitignore() {
+  const gitignorePath = join(process.cwd(), ".gitignore");
+  const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+  if (!existing.split("\n").some(line => line.trim() === ".chat/" || line.trim() === ".chat")) {
+    const separator = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+    writeFileSync(gitignorePath, existing + separator + ".chat/\n");
+  }
+}
+
 // --- Commands ---
 
 async function cmdInit(args: string[]) {
@@ -96,6 +105,9 @@ async function cmdInit(args: string[]) {
     metadata: JSON.stringify({ channel_config: { name: "general", description: "General discussion", status: "active" } }),
   });
   db.close();
+
+  // Ensure .chat/ is in .gitignore
+  ensureGitignore();
 
   // Create CHAT.md in project root
   const chatMdPath = join(process.cwd(), "CHAT.md");
@@ -160,6 +172,9 @@ async function cmdJoin(args: string[]) {
 
   // Initial sync
   const result = await sync(chatDir);
+
+  // Ensure .chat/ is in .gitignore
+  ensureGitignore();
 
   console.log(`Joined: ${info.name} (owner: ${info.owner})`);
   console.log(`  Directory: ${chatDir}`);
@@ -556,6 +571,81 @@ async function cmdThread(args: string[]) {
   }
 
   console.log(JSON.stringify({ root: stripNulls(root), replies: replies.map(stripNulls), participants, reply_count }, null, 2));
+}
+
+interface Trigger {
+  name: string;
+  pattern: string;
+  command: string;
+  cooldown?: number;
+}
+
+async function cmdWatch(args: string[]) {
+  const { flags } = parseArgs(args);
+  const chatDir = requireChatDir();
+  const config = readConfig(chatDir);
+
+  const triggersPath = join(chatDir, "triggers.json");
+  if (!existsSync(triggersPath)) {
+    console.error("No triggers configured. Create .chat/triggers.json");
+    console.error('Example: [{"name":"bot","pattern":"@bot","command":"echo triggered","cooldown":60}]');
+    process.exit(1);
+  }
+
+  const triggers: Trigger[] = JSON.parse(readFileSync(triggersPath, "utf-8"));
+  if (triggers.length === 0) {
+    console.error("No triggers defined in .chat/triggers.json");
+    process.exit(1);
+  }
+
+  const port = parseInt(flags.port as string) || config.port || 4321;
+  const cooldowns = new Map<string, number>();
+
+  function connect() {
+    const ws = new WebSocket(`ws://localhost:${port}/ws`);
+
+    ws.onopen = () => {
+      console.log(`Watching ${triggers.length} trigger(s) on ws://localhost:${port}/ws`);
+      for (const t of triggers) {
+        console.log(`  ${t.name}: pattern="${t.pattern}" cooldown=${t.cooldown ?? 60}s`);
+      }
+    };
+
+    ws.onmessage = (event) => {
+      let data: any;
+      try {
+        data = JSON.parse(event.data as string);
+      } catch {
+        return;
+      }
+      if (data.type !== "msg") return;
+
+      for (const trigger of triggers) {
+        if (!data.content.includes(trigger.pattern)) continue;
+
+        const now = Date.now();
+        const lastFired = cooldowns.get(trigger.name) || 0;
+        if (now - lastFired < (trigger.cooldown ?? 60) * 1000) continue;
+
+        cooldowns.set(trigger.name, now);
+        const time = new Date().toLocaleTimeString();
+        console.log(`[${time}] Trigger: ${trigger.name} (by ${data.author} in #${data.channel})`);
+        Bun.spawn(["sh", "-c", trigger.command], { stdout: "inherit", stderr: "inherit" });
+      }
+    };
+
+    ws.onclose = () => {
+      console.log("WebSocket closed, reconnecting in 5s...");
+      setTimeout(connect, 5000);
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after this
+    };
+  }
+
+  connect();
+  await new Promise(() => {});
 }
 
 async function cmdStatus() {
@@ -1190,6 +1280,7 @@ Commands:
   summary latest <channel>        Show latest summary for a channel
 
   status                          Show chat info
+  watch [--port N]                Watch messages and run triggers (.chat/triggers.json)
 
 Options:
   --identity <name>               Set your identity (default: OS username)
@@ -1217,6 +1308,7 @@ switch (cmd) {
   case "memory":         await cmdMemory(args); break;
   case "summary":        await cmdSummary(args); break;
   case "status":         await cmdStatus(); break;
+  case "watch":          await cmdWatch(args); break;
   case "help": case "--help": case "-h": case undefined:
     showHelp(); break;
   default:
