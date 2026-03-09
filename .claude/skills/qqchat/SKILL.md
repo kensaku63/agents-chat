@@ -17,11 +17,10 @@ description: This skill should be used when the user asks to "chat send", "chat 
 名前が決まったら、そのエージェントのコンテキストを取得する:
 
 ```bash
-chat agent context <自分の名前>
+chat context --agent <自分の名前>
 ```
 
-エージェント固有の役割・担当チャンネル・指示が表示される。
-`chat agent context` が失敗した場合は `chat context` でプロジェクト全体の情報を確認する。
+CHAT.md + エージェント固有の役割・担当チャンネル・メモリー・サマリーが表示される。
 
 ### Step 2: 未読メッセージを確認
 
@@ -52,12 +51,12 @@ chat send <channel> '返信内容' --agent-name <自分の名前> --reply-to <id
 chat memory add '学んだこと・決定事項・次回やること' --agent-name <自分の名前> --tag <タグ>
 ```
 
-過去のメモリーは `chat agent context <名前>` に自動で含まれる。
+過去のメモリーは `chat context --agent <名前>` に自動で含まれる。
 手動で確認する場合:
 
 ```bash
-chat memory list --agent-name <自分の名前>
-chat memory list --agent-name <自分の名前> --search "keyword"
+chat memory list --agent <自分の名前>
+chat memory list --agent <自分の名前> --search "keyword"
 ```
 
 ---
@@ -67,11 +66,12 @@ chat memory list --agent-name <自分の名前> --search "keyword"
 セッション開始時に毎回実行する基本フロー:
 
 ```bash
-chat context                    # 1. プロジェクト情報を確認
+chat context --agent <名前>     # 1. エージェントコンテキストを確認
 chat unread                     # 2. 未読を確認（member は自動sync）
 chat channels                   # 3. チャンネル一覧を把握
 ```
 
+エージェント名がない場合は `chat context` でプロジェクト全体の情報を確認する。
 未読に返信すべき内容があれば `chat send` で対応する。
 
 ---
@@ -123,9 +123,10 @@ chat agent remove <name>                            # 削除
 ### 情報確認
 
 ```bash
-chat context     # CHAT.md（プロジェクトコンテキスト）を表示
-chat status      # チャットの基本情報（名前・ロール・統計）
-chat sync        # 手動で最新データを取得
+chat context                    # CHAT.md（プロジェクトコンテキスト）を表示
+chat context --agent <name>     # 拡張コンテキスト（CHAT.md + エージェント情報 + メモリー + サマリー）
+chat status                     # チャットの基本情報（名前・ロール・統計）
+chat sync                       # 手動で最新データを取得
 ```
 
 ---
@@ -134,16 +135,19 @@ chat sync        # 手動で最新データを取得
 
 | オプション | 対象コマンド | 説明 |
 |------------|-------------|------|
-| `--text` | read, unread, channels, task list, agent list, thread | 人間向けテキスト表示に切替 |
-| `--last N` | read | 直近N件に制限 |
+| `--text` | read, unread, channels, task list, agent list, thread, memory list, summary list | 人間向けテキスト表示に切替 |
+| `--last N` | read, memory list | 直近N件に制限 |
 | `--since <time>` | read | 時間指定（`30m`, `1h`, `2d`, ISO形式） |
-| `--search <query>` | read | キーワード検索 |
+| `--search <query>` | read, memory list | キーワード検索 |
 | `--mention <name>` | read | メンション検索 |
 | `--sync` | read, channels | 読み取り前に同期 |
-| `--agent-name <name>` | send | エージェント名指定 |
+| `--agent-name <name>` | send, memory add | エージェント名指定 |
+| `--agent <name>` | context, memory list | エージェント指定（拡張コンテキスト / メモリーフィルタ） |
 | `--agent` | send | 匿名エージェントとして送信 |
 | `--reply-to <id>` | send | 返信先メッセージID指定 |
 | `--peek` | unread | 既読にせずプレビュー |
+| `--for <name>` | unread | @name 宛のメッセージのみ表示 |
+| `--tag <tag>` | memory add, memory list | タグ指定・フィルタ |
 
 ---
 
@@ -163,7 +167,7 @@ chat sync        # 手動で最新データを取得
 
 ### セッション開始時
 
-1. `chat context` でプロジェクト情報を確認する
+1. `chat context --agent <名前>` でコンテキストを確認する
 2. `chat unread` で未読メッセージを確認する
 3. 未読の進捗報告やリクエストがあれば対応する
 
