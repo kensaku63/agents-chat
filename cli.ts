@@ -617,14 +617,27 @@ async function cmdWatch(args: string[]) {
   const port = parseInt(flags.port as string) || config.port || 4321;
   const cooldowns = new Map<string, number>();
 
+  function toWsUrl(httpUrl: string): string {
+    return httpUrl
+      .replace(/^https:\/\//, 'wss://')
+      .replace(/^http:\/\//, 'ws://')
+      .replace(/\/?$/, '/ws');
+  }
+
+  const wsUrls = getUpstreamUrls(config).map(toWsUrl);
+  if (wsUrls.length === 0) wsUrls.push(`ws://localhost:${port}/ws`);
+  let urlIndex = 0;
+
   function connect() {
-    const ws = new WebSocket(`ws://localhost:${port}/ws`);
+    const wsUrl = wsUrls[urlIndex];
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log(`Watching ${triggers.length} trigger(s) on ws://localhost:${port}/ws`);
+      console.log(`Watching ${triggers.length} trigger(s) on ${wsUrl}`);
       for (const t of triggers) {
         console.log(`  ${t.name}: pattern="${t.pattern}" cooldown=${t.cooldown ?? 60}s`);
       }
+      urlIndex = 0;
     };
 
     ws.onmessage = (event) => {
@@ -651,7 +664,9 @@ async function cmdWatch(args: string[]) {
     };
 
     ws.onclose = () => {
-      console.log("WebSocket closed, reconnecting in 5s...");
+      urlIndex = (urlIndex + 1) % wsUrls.length;
+      const next = wsUrls[urlIndex];
+      console.log(`WebSocket closed, reconnecting to ${next} in 5s...`);
       setTimeout(connect, 5000);
     };
 
