@@ -69,15 +69,26 @@ Error: Unknown reader "typo-name". Register as agent (chat agent create) or ensu
 agent_config.channels = ["planning", "general"]
 ```
 
-未読取得ロジック:
+未読取得ロジック（エージェント、購読チャンネルあり）:
 
 ```sql
 SELECT * FROM messages
 WHERE id > :cursor
   AND (
     channel IN (:subscribed_channels)   -- 購読チャンネルは全メッセージ
-    OR content LIKE '%@:agent_name%'     -- 他チャンネルはメンションのみ
+    OR content LIKE '%@agent_name%'     -- 他チャンネルはメンションのみ
   )
+  AND channel != '_system'
+ORDER BY id ASC
+```
+
+エージェント、購読チャンネルなし（`channels: []`）:
+
+```sql
+-- メンションのみ返す（全メッセージにフォールバックしない）
+SELECT * FROM messages
+WHERE id > :cursor
+  AND content LIKE '%@agent_name%'
   AND channel != '_system'
 ORDER BY id ASC
 ```
