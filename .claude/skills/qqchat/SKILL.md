@@ -44,7 +44,7 @@ chat send <channel> 'メッセージ' --agent-name <自分の名前>
 chat send <channel> '返信内容' --agent-name <自分の名前> --reply-to <id>
 ```
 
-### Step 4: メモリーを活用する（推奨）
+### Step 4: メモリーを活用する
 
 セッション間で知識を引き継ぐために、重要な情報はメモリーに保存する:
 

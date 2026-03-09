@@ -40,6 +40,10 @@ chat init myteam
 - `.chat/` ディレクトリが作成される（`config.json` + `chat.db`）
 - 実行者が **owner** になる
 - `--identity <name>` でidentity名を指定可能
+- `.chat/` を `.gitignore` に追加しておくこと（DB・設定はリポジトリに含めない）:
+  ```bash
+  echo '.chat/' >> .gitignore
+  ```
 
 ## 3. 既存チャットに参加する（Member）
 
@@ -70,9 +74,31 @@ chat serve
 ```bash
 chat serve --port 8080              # ポート指定
 chat serve --no-tunnel              # トンネルなし（ローカルのみ）
-chat serve --tunnel-name myteam --tunnel-hostname myteam.example.com
-                                    # 固定URL付き（Named Tunnel）
 ```
+
+### 固定URLで公開する（Named Tunnel）(推奨)
+
+デフォルトの Quick Tunnel はURLが毎回変わる。固定URLにするには Cloudflare Named Tunnel を使う。
+
+#### 前提条件
+
+- `cloudflared` がインストール済みであること
+- Cloudflare に自分のドメインが登録済みであること（例: `example.com`）
+
+#### 手順
+
+1. 初回起動時に `--tunnel-name` と `--tunnel-hostname` を指定:
+   ```bash
+   chat serve --tunnel-name myteam --tunnel-hostname chat.example.com
+   ```
+2. ブラウザが開くので Cloudflare にログインする（初回のみ）
+3. トンネル作成 → DNS設定 → サーバー起動が自動で行われる
+4. 以降は設定が `config.json` に保存されるので `chat serve` だけで固定URLが使われる
+
+#### 結果
+
+- `https://chat.example.com` でチャットにアクセスできるようになる
+- チームメンバーは `chat join https://chat.example.com` で参加できる
 
 ### バックアップ待機（Member向け）
 
