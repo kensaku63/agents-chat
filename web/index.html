@@ -97,7 +97,31 @@
       font-weight: 500;
     }
 
-    .channel-item::before { content: '# '; color: var(--text-muted); }
+    .channel-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .channel-item::before { content: '# '; color: var(--text-muted); flex-shrink: 0; }
+
+    .channel-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .unread-badge {
+      background: var(--accent);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      min-width: 18px;
+      height: 18px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 5px;
+      flex-shrink: 0;
+      margin-left: 4px;
+    }
 
     .channel-status {
       display: inline-block;
@@ -362,6 +386,87 @@
       font-size: 13px;
     }
     .ref-link:hover { text-decoration: underline; }
+
+    .input-hints {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 4px 2px 0;
+    }
+
+    .identity-edit-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 1;
+    }
+    .identity-edit-input {
+      flex: 1;
+      padding: 2px 6px;
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 3px;
+      background: rgba(255,255,255,0.1);
+      color: var(--sidebar-text);
+      font-size: 11px;
+      font-family: inherit;
+      outline: none;
+    }
+    .identity-edit-input:focus { border-color: var(--accent); }
+    .identity-edit-btn {
+      background: none;
+      border: none;
+      color: var(--sidebar-text);
+      font-size: 12px;
+      cursor: pointer;
+      padding: 0 2px;
+      line-height: 1;
+    }
+
+    .welcome-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .welcome-form {
+      background: #fff;
+      border-radius: 12px;
+      padding: 32px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
+    .welcome-form h2 { margin-bottom: 16px; font-size: 18px; }
+    .welcome-form input {
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      width: 220px;
+      outline: none;
+      font-family: inherit;
+    }
+    .welcome-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124,58,237,0.1); }
+    .welcome-form button {
+      margin-top: 12px;
+      padding: 10px 24px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .welcome-form button:hover { background: var(--accent-hover); }
+
+    .role-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
 
     .msg-actions { opacity: 0; transition: opacity 0.1s; margin-top: 2px; }
     .message:hover .msg-actions { opacity: 1; }
@@ -778,35 +883,6 @@
     }
     #welcome-join-btn:hover { background: var(--accent-hover); }
 
-    /* Inline identity editing */
-    #identity-edit-row {
-      display: none;
-      align-items: center;
-      gap: 4px;
-      width: 100%;
-    }
-    #identity-edit-input {
-      flex: 1;
-      padding: 3px 6px;
-      border: 1px solid rgba(255,255,255,0.3);
-      border-radius: 3px;
-      font-size: 11px;
-      background: transparent;
-      color: var(--sidebar-text);
-      outline: none;
-      font-family: inherit;
-    }
-    #identity-edit-input:focus { border-color: var(--accent); }
-    .identity-edit-btn {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      font-size: 12px;
-      cursor: pointer;
-      padding: 2px 4px;
-    }
-    .identity-edit-btn:hover { color: var(--sidebar-text); }
-
     /* Mention item role info */
     .mention-item-role {
       font-size: 11px;
@@ -821,29 +897,6 @@
       margin-right: 4px;
       vertical-align: middle;
     }
-
-    /* Shortcut hints */
-    #shortcut-hints {
-      font-size: 11px;
-      color: var(--text-muted);
-      padding: 4px 0 0;
-    }
-
-    /* Unread badge */
-    .unread-badge {
-      background: var(--accent);
-      color: #fff;
-      font-size: 10px;
-      font-weight: 700;
-      border-radius: 10px;
-      padding: 1px 6px;
-      margin-left: auto;
-      min-width: 18px;
-      text-align: center;
-      display: none;
-    }
-    .channel-item { display: flex; align-items: center; }
-    .channel-item-name { flex: 1; }
   </style>
 </head>
 <body>
@@ -869,11 +922,6 @@
         <span>&#x1F464;</span>
         <span id="identity-label"></span>
         <button id="identity-change-btn">Change</button>
-        <div id="identity-edit-row">
-          <input type="text" id="identity-edit-input" />
-          <button class="identity-edit-btn" id="identity-save-btn">&#x2713;</button>
-          <button class="identity-edit-btn" id="identity-cancel-btn">&#x2717;</button>
-        </div>
       </div>
       <div id="status-bar">
         <span class="status-dot connecting"></span>
@@ -984,10 +1032,10 @@
         </div>
         <div id="input-row">
           <div id="mention-popup"></div>
-          <textarea id="message-input" placeholder="Type a message... (@ to mention, Shift+Enter for newline)" rows="1" autocomplete="off"></textarea>
+          <textarea id="message-input" placeholder="Type a message..." rows="1" autocomplete="off"></textarea>
           <button id="send-btn">Send</button>
         </div>
-        <div id="shortcut-hints">Enter: send / Shift+Enter: newline / @: mention</div>
+        <div class="input-hints">Enter: 送信 / Shift+Enter: 改行 / @: メンション</div>
       </div>
     </main>
   </div>
@@ -1253,7 +1301,6 @@
             fetchChannels();
           }
           state.messages.push(data);
-          // Track unread for non-current channels
           if (data.channel !== state.currentChannel || state.currentView !== 'chat') {
             state.unreadCounts[data.channel] = (state.unreadCounts[data.channel] || 0) + 1;
             renderChannels();
@@ -1295,23 +1342,18 @@
       let list = document.getElementById('channel-list');
       while (list.firstChild) list.removeChild(list.firstChild);
       state.channels.forEach(function(ch) {
-        let badge = el('span', { className: 'unread-badge' });
-        badge.setAttribute('data-unread-ch', ch.name);
-        let count = state.unreadCounts[ch.name] || 0;
-        if (count > 0) {
-          badge.textContent = count > 99 ? '99+' : count;
-          badge.style.display = '';
+        let children = [el('span', { className: 'channel-item-name' }, [ch.name])];
+        let unread = state.unreadCounts[ch.name] || 0;
+        if (unread > 0) {
+          children.push(el('span', { className: 'unread-badge' }, [String(unread)]));
+        }
+        if (ch.status) {
+          children.push(el('span', { className: 'channel-status ' + ch.status }));
         }
         let item = el('div', {
           className: 'channel-item' + (ch.name === state.currentChannel && state.currentView === 'chat' ? ' active' : ''),
           title: ch.description || '',
-        }, [
-          el('span', { className: 'channel-item-name' }, [ch.name]),
-          ch.status ? el('span', {
-            className: 'channel-status ' + ch.status,
-          }) : null,
-          badge,
-        ]);
+        }, children);
         item.addEventListener('click', function() { switchChannel(ch.name); });
         list.appendChild(item);
       });
@@ -1348,19 +1390,22 @@
       descEl.textContent = (ch && ch.description) ? ch.description : '';
     }
 
+    function getAgentRoleColor(author) {
+      let name = getDisplayName(author);
+      let info = state.agents[name];
+      return info ? getRoleColor(info.role) : null;
+    }
+
     function createMessageEl(msg) {
       let agent = isAgent(msg.author);
 
-      // Avatar with role color
+      // Avatar
       let avatar = el('div', { className: 'msg-avatar ' + (agent ? 'agent' : 'human') }, [
         getInitials(msg.author)
       ]);
       if (agent) {
-        let agentName = getDisplayName(msg.author);
-        let agentInfo = state.agents[agentName];
-        if (agentInfo && agentInfo.role) {
-          avatar.style.background = getRoleColor(agentInfo.role);
-        }
+        let roleColor = getAgentRoleColor(msg.author);
+        if (roleColor) avatar.style.background = roleColor;
       }
 
       // Reply reference
@@ -1583,14 +1628,11 @@
 
     function getMentionCandidates(query) {
       let q = query.toLowerCase();
-      // Build unique candidate list from members + agent names
       let seen = {};
       let candidates = [];
-      // Add human members
       state.members.forEach(function(m) {
         if (!seen[m]) { seen[m] = true; candidates.push({ name: m, role: null }); }
       });
-      // Add agent names from state.agents
       Object.keys(state.agents).forEach(function(agentName) {
         if (!seen[agentName]) {
           seen[agentName] = true;
@@ -1705,6 +1747,7 @@
     document.getElementById('add-channel-btn').addEventListener('click', function() {
       switchView('channels');
       openChannelForm(null);
+      closeMobileSidebar();
     });
 
     // --- View Management ---
@@ -1876,9 +1919,12 @@
 
         let cardBody = el('div', { className: 'card-body' });
         if (info.role) {
+          let dot = el('span', { className: 'role-dot' });
+          dot.style.background = getRoleColor(info.role);
           cardBody.appendChild(el('div', { className: 'card-field' }, [
             el('span', { className: 'field-label' }, ['Role ']),
-            el('span', { className: 'field-value' }, [info.role]),
+            dot,
+            el('span', { className: 'field-value' }, [' ' + info.role]),
           ]));
         }
         if (channelsText) {
@@ -1905,10 +1951,8 @@
         memContent.setAttribute('data-memory-content', name);
         memContent.style.display = 'none';
 
-        let cardHeader = el('div', { className: 'card-header' }, [avatar, el('span', { className: 'card-title' }, [name])]);
-        if (info.role) addRoleBadge(cardHeader, info.role);
         let card = el('div', { className: 'card' }, [
-          cardHeader,
+          el('div', { className: 'card-header' }, [avatar, el('span', { className: 'card-title' }, [name])]),
           cardBody,
           memToggle,
           memContent,
@@ -2266,45 +2310,45 @@
       }
     });
 
-    // Inline identity editing
     document.getElementById('identity-change-btn').addEventListener('click', function() {
-      document.getElementById('identity-label').style.display = 'none';
-      document.getElementById('identity-change-btn').style.display = 'none';
-      let editRow = document.getElementById('identity-edit-row');
-      let editInput = document.getElementById('identity-edit-input');
-      editRow.style.display = 'flex';
-      editInput.value = state.identity;
-      editInput.focus();
-      editInput.select();
-    });
+      let bar = document.getElementById('identity-bar');
+      let label = document.getElementById('identity-label');
+      let btn = document.getElementById('identity-change-btn');
+      label.style.display = 'none';
+      btn.style.display = 'none';
 
-    async function saveIdentity() {
-      let editInput = document.getElementById('identity-edit-input');
-      let newName = editInput.value.trim() || state.identity;
-      let oldName = state.identity;
-      state.identity = newName;
-      localStorage.setItem('qqchat-identity', newName);
-      document.getElementById('identity-label').textContent = newName;
-      document.getElementById('identity-label').style.display = '';
-      document.getElementById('identity-change-btn').style.display = '';
-      document.getElementById('identity-edit-row').style.display = 'none';
-      if (newName !== oldName) {
-        await registerMember(newName, oldName);
-        await fetchMembers();
+      let row = el('div', { className: 'identity-edit-row' });
+      let input = el('input', { className: 'identity-edit-input', value: state.identity });
+      let okBtn = el('button', { className: 'identity-edit-btn' }, ['\u2713']);
+      let cancelBtn = el('button', { className: 'identity-edit-btn' }, ['\u00D7']);
+      row.appendChild(input);
+      row.appendChild(okBtn);
+      row.appendChild(cancelBtn);
+      bar.insertBefore(row, label);
+      input.focus();
+      input.select();
+
+      function finish(save) {
+        if (save) {
+          let newName = input.value.trim() || state.identity;
+          let oldName = state.identity;
+          state.identity = newName;
+          localStorage.setItem('qqchat-identity', newName);
+          label.textContent = newName;
+          registerMember(newName, oldName);
+          fetchMembers();
+        }
+        row.remove();
+        label.style.display = '';
+        btn.style.display = '';
       }
-    }
 
-    function cancelIdentityEdit() {
-      document.getElementById('identity-label').style.display = '';
-      document.getElementById('identity-change-btn').style.display = '';
-      document.getElementById('identity-edit-row').style.display = 'none';
-    }
-
-    document.getElementById('identity-save-btn').addEventListener('click', saveIdentity);
-    document.getElementById('identity-cancel-btn').addEventListener('click', cancelIdentityEdit);
-    document.getElementById('identity-edit-input').addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') { e.preventDefault(); saveIdentity(); }
-      if (e.key === 'Escape') { cancelIdentityEdit(); }
+      okBtn.addEventListener('click', function() { finish(true); });
+      cancelBtn.addEventListener('click', function() { finish(false); });
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        if (e.key === 'Escape') finish(false);
+      });
     });
 
     // Agent role select - show custom input when "Other..." selected
@@ -2318,16 +2362,6 @@
         custom.value = '';
       }
     });
-
-    // Agent role badge color in card header
-    function addRoleBadge(headerEl, role) {
-      if (!role) return;
-      let dot = el('span', { className: 'mention-role-dot' });
-      dot.style.background = getRoleColor(role);
-      let badge = el('span', { className: 'mention-item-role' }, [dot, role]);
-      badge.style.marginLeft = '8px';
-      headerEl.appendChild(badge);
-    }
 
     // --- Mobile sidebar ---
 
