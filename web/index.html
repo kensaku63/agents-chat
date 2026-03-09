@@ -2675,6 +2675,7 @@
         card.appendChild(el('span', { className: 'orch-name' }, [name]));
         var detail = el('div', { className: 'orch-detail' });
         detail.appendChild(el('span', { className: 'orch-tag' }, [cfg.interval || '5m']));
+        detail.appendChild(el('span', { className: 'orch-tag ai' }, [cfg.ai || 'claude']));
         if (cfg.directory) detail.appendChild(el('span', { className: 'orch-tag dir' }, [cfg.directory]));
         card.appendChild(detail);
         var removeBtn = el('button', { className: 'orch-remove' }, ['\u00d7']);
@@ -2760,10 +2761,18 @@
       var intervalInput = el('input', { className: 'form-input', value: existing ? existing.interval : '5m', placeholder: '5m' });
       intervalInput.style.width = '80px';
 
+      var aiSelect = el('select', { className: 'form-input' });
+      ['claude', 'codex', 'gemini'].forEach(function(ai) {
+        var opt = el('option', { value: ai }, [ai.charAt(0).toUpperCase() + ai.slice(1)]);
+        if (existing && existing.ai === ai) opt.selected = true;
+        aiSelect.appendChild(opt);
+      });
+
       var dirInput = el('input', { className: 'form-input', value: existing ? (existing.directory || '') : '', placeholder: 'Directory (default: QQchat dir)' });
 
       form.appendChild(el('div', { className: 'form-row' }, [
         el('div', { style: 'flex:1' }, [el('label', {}, ['Agent']), agentSelect]),
+        el('div', { style: 'flex:0 0 auto;min-width:100px' }, [el('label', {}, ['AI']), aiSelect]),
         el('div', { style: 'flex:0 0 auto' }, [el('label', {}, ['Interval']), intervalInput]),
       ]));
       form.appendChild(el('div', { className: 'form-row' }, [
@@ -2785,6 +2794,7 @@
         if (editName && editName !== name) delete state.orchestration.loopAgents[editName];
         state.orchestration.loopAgents[name] = {
           interval: interval,
+          ai: aiSelect.value || 'claude',
           directory: dirInput.value.trim(),
         };
         saveOrchestration();
@@ -2919,8 +2929,7 @@
         var dir = entry.cfg.directory || '';
         if (!dir && entry.triggerCfg && entry.triggerCfg.directory) dir = entry.triggerCfg.directory;
 
-        var ai = 'claude';
-        if (entry.type === 'trigger') ai = entry.cfg.ai || 'claude';
+        var ai = entry.cfg.ai || 'claude';
         if (entry.triggerCfg) ai = entry.triggerCfg.ai || ai;
 
         var cdCmd = dir ? 'cd ' + dir + ' && ' : '';
