@@ -257,20 +257,31 @@ export function getTasks(db: Database, statusFilter?: string): Task[] {
   return tasks;
 }
 
-export function getUnreadMessages(db: Database, sinceId: string, forName?: string): Message[] {
-  const conds: string[] = [];
+export function getUnreadMessages(
+  db: Database,
+  sinceId: string,
+  opts?: { channels?: string[]; mentionName?: string }
+): Message[] {
+  const conds: string[] = ["channel != '_system'"];
   const params: any[] = [];
 
   if (sinceId) {
     conds.push("id > ?");
     params.push(sinceId);
   }
-  if (forName) {
-    conds.push("content LIKE ?");
-    params.push(`%@${forName}%`);
+
+  if (opts?.mentionName) {
+    if (opts.channels && opts.channels.length > 0) {
+      const placeholders = opts.channels.map(() => "?").join(", ");
+      conds.push(`(channel IN (${placeholders}) OR content LIKE ?)`);
+      params.push(...opts.channels, `%@${opts.mentionName}%`);
+    } else {
+      conds.push("content LIKE ?");
+      params.push(`%@${opts.mentionName}%`);
+    }
   }
 
-  const where = conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : "";
+  const where = `WHERE ${conds.join(" AND ")}`;
   return db.prepare(`SELECT * FROM messages ${where} ORDER BY id ASC`).all(...params) as Message[];
 }
 

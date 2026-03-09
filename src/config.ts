@@ -1,5 +1,5 @@
-import { join, resolve } from "node:path";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve, basename } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 export interface ChatConfig {
   role: "owner" | "member";
@@ -52,12 +52,28 @@ export function writeSyncCursor(chatDir: string, cursor: string): void {
   writeFileSync(join(chatDir, ".sync"), cursor);
 }
 
+/** @deprecated Use readReaderCursor instead */
 export function readReadCursor(chatDir: string): string {
   const p = join(chatDir, ".read_cursor");
   if (!existsSync(p)) return "";
   return readFileSync(p, "utf-8").trim();
 }
 
+/** @deprecated Use writeReaderCursor instead */
 export function writeReadCursor(chatDir: string, cursor: string): void {
   writeFileSync(join(chatDir, ".read_cursor"), cursor);
+}
+
+export function readReaderCursor(chatDir: string, reader: string): string {
+  const safe = basename(reader);
+  const p = join(chatDir, "read_cursors", safe);
+  if (!existsSync(p)) return "";
+  return readFileSync(p, "utf-8").trim();
+}
+
+export function writeReaderCursor(chatDir: string, reader: string, cursor: string): void {
+  const safe = basename(reader);
+  const dir = join(chatDir, "read_cursors");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, safe), cursor);
 }

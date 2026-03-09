@@ -3,9 +3,9 @@ import { resolve, join, basename } from "node:path";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { findChatDir, requireChatDir, readConfig, writeConfig, type ChatConfig } from "./src/config";
-import { openDb, createChannel, getChannels, queryMessages, getThread, getUnreadMessages, idToTime, getTasks, getMessage, getMemories, getSummaries, resolveThreadRoot, generateId, insertMessage, getAgentConfigs, getChannelConfigs, type ThreadedMessage, type AgentConfigData } from "./src/db";
+import { openDb, createChannel, getChannels, queryMessages, getThread, getUnreadMessages, idToTime, getTasks, getMessage, getMembers, getMemories, getSummaries, resolveThreadRoot, generateId, insertMessage, getAgentConfigs, getChannelConfigs, type ThreadedMessage, type AgentConfigData } from "./src/db";
 import { sync, sendToUpstream, getUpstreamUrls } from "./src/sync";
-import { readReadCursor, writeReadCursor } from "./src/config";
+import { readReaderCursor, writeReaderCursor } from "./src/config";
 import { startServer, startTunnel, startNamedTunnel, isCloudflaredLoggedIn, startStandbyMode, syncFromBackups } from "./src/server";
 
 // --- Arg parsing ---
@@ -461,30 +461,47 @@ async function cmdChannelCreate(args: string[]) {
 }
 
 async function cmdUnread(args: string[]) {
-  const { flags } = parseArgs(args);
+  const { positional, flags } = parseArgs(args);
+  const reader = positional[0];
+
+  if (!reader) {
+    console.error('Error: Reader name required. Usage: chat unread <reader> [--peek] [--text]');
+    process.exit(1);
+  }
+
   const chatDir = requireChatDir();
   const config = readConfig(chatDir);
 
-  // Sync if member
   if (config.upstream) {
     await sync(chatDir);
   }
 
-  const cursor = readReadCursor(chatDir);
   const db = openDb(chatDir);
-  const forName = flags.for as string | undefined;
-  const msgs = getUnreadMessages(db, cursor, forName);
+  const agents = getAgentConfigs(db);
+  const members = getMembers(db);
+  const isAgent = !!agents[reader];
+  const isHuman = members.some(m => m.name === reader && m.type === "human");
 
-  // Update read cursor to latest unfiltered message (skip when --peek or --for)
-  if (!flags["peek"] && !forName && msgs.length > 0) {
-    writeReadCursor(chatDir, msgs[msgs.length - 1]!.id);
-  } else if (!flags["peek"] && forName) {
-    // When using --for, still advance cursor based on all unread
-    const allMsgs = getUnreadMessages(db, cursor);
-    if (allMsgs.length > 0) writeReadCursor(chatDir, allMsgs[allMsgs.length - 1]!.id);
+  if (!isAgent && !isHuman) {
+    console.error(`Error: Unknown reader "${reader}". Register as agent (chat agent create) or ensure member exists.`);
+    db.close();
+    process.exit(1);
   }
 
-  // Build thread context for messages with reply_to
+  const cursor = readReaderCursor(chatDir, reader);
+  let msgs;
+
+  if (isAgent) {
+    const channels = agents[reader]!.channels;
+    msgs = getUnreadMessages(db, cursor, { channels, mentionName: reader });
+  } else {
+    msgs = getUnreadMessages(db, cursor);
+  }
+
+  if (!flags.peek && msgs.length > 0) {
+    writeReaderCursor(chatDir, reader, msgs[msgs.length - 1]!.id);
+  }
+
   const threadContextMap = new Map<string, string>();
   for (const msg of msgs) {
     if (msg.reply_to && !threadContextMap.has(msg.reply_to)) {
@@ -507,7 +524,6 @@ async function cmdUnread(args: string[]) {
   }
 
   if (flags.text) {
-    // Group by channel
     const grouped = new Map<string, typeof msgs>();
     for (const msg of msgs) {
       if (!grouped.has(msg.channel)) grouped.set(msg.channel, []);
@@ -1236,9 +1252,8 @@ Commands:
     --sync                        Sync from upstream before reading
     --text                        Output as human-readable text
 
-  unread [--peek] [--for <name>]   Show unread messages (default: JSON output)
+  unread <reader> [--peek]         Show unread messages for a reader
     --peek                        Don't mark messages as read
-    --for <name>                  Show only messages mentioning @name
     --text                        Output as human-readable text
 
   thread <message-id>              View a message thread (default: JSON output)

@@ -52,7 +52,7 @@ Data lives in `.chat/` dir: `config.json` (node-local), `chat.db` (all shared da
 
 Per-reader unread tracking. Each reader (human or agent) has an independent read cursor.
 
-- **Storage**: `.chat/.read_cursors.json` — `{ "kensaku": "<msg_id>", "directore": "<msg_id>", ... }`
+- **Storage**: `.chat/read_cursors/<reader>` — 1リーダー1ファイル。中身はメッセージID（プレーンテキスト）。並行書き込み安全。
 - **CLI**: `chat unread <reader>` — reader name is **required** (positional arg). No default/fallback.
 - **Validation**: reader must be a known identity. Unknown names → error, not fallback.
   - Agent: exists in `getAgentConfigs()` → subscribed channels (`agent_config.channels`) + `@name` mentions from all channels

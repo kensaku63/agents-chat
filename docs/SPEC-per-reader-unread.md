@@ -5,7 +5,7 @@
 現在の未読管理は `.chat/.read_cursor`（単一ファイル）で全エージェント・全ユーザーが共有している。
 
 - `directore` が `chat unread` を実行 → カーソルが進む → `plan-kun` の未読が消える
-- `--for` フラグはメンションフィルターのみで、カーソルは全体で共有のまま進む
+- 旧 `--for` フラグはメンションフィルターのみで、カーソルは全体で共有のまま進んでいた
 - エージェントごとに関心のあるチャンネルが異なるのに、全チャンネルの未読が混在する
 
 ## Solution
@@ -14,20 +14,20 @@
 
 ## Design
 
-### 1. Storage: `.read_cursors.json`
+### 1. Storage: `read_cursors/` ディレクトリ
 
-`.chat/.read_cursor`（単一テキストファイル）を廃止し、`.chat/.read_cursors.json` に移行。
+`.chat/.read_cursor`（単一テキストファイル）を廃止し、`.chat/read_cursors/` ディレクトリに移行。リーダーごとに1ファイル。
 
-```json
-{
-  "kensaku": "m1abc_123",
-  "directore": "m1abc_456",
-  "plan-kun": "m1abc_400"
-}
+```
+.chat/read_cursors/
+  kensaku       → m1abc_123
+  directore     → m1abc_456
+  plan-kun      → m1abc_400
 ```
 
-- キー: リーダー名（人間名またはエージェント名）
-- 値: 最後に読んだメッセージ ID
+- ファイル名: リーダー名（人間名またはエージェント名）
+- ファイル内容: 最後に読んだメッセージ ID（プレーンテキスト）
+- 1リーダー1ファイルなので、並行書き込みの競合が発生しない
 - 旧 `.read_cursor` は無視（移行処理なし。各リーダーの初回実行でカーソルが作られる）
 
 ### 2. CLI: `chat unread <reader>`
@@ -39,7 +39,6 @@ chat unread <reader> [--peek] [--text]
 - `<reader>`: 必須の位置引数。リーダー名を指定する。
 - `--peek`: カーソルを更新しない
 - `--text`: テキスト出力
-- `--for`: 廃止
 
 #### Validation（エラー優先、フォールバックなし）
 
@@ -140,29 +139,20 @@ chat unread <name>
 ### src/config.ts
 
 ```typescript
-// 追加
 export function readReaderCursor(chatDir: string, reader: string): string {
-  const p = join(chatDir, ".read_cursors.json");
+  const p = join(chatDir, "read_cursors", reader);
   if (!existsSync(p)) return "";
-  const data = JSON.parse(readFileSync(p, "utf-8"));
-  return data[reader] || "";
+  return readFileSync(p, "utf-8").trim();
 }
 
 export function writeReaderCursor(chatDir: string, reader: string, cursor: string): void {
-  const p = join(chatDir, ".read_cursors.json");
-  let data: Record<string, string> = {};
-  if (existsSync(p)) {
-    data = JSON.parse(readFileSync(p, "utf-8"));
-  }
-  data[reader] = cursor;
-  writeFileSync(p, JSON.stringify(data, null, 2));
+  const dir = join(chatDir, "read_cursors");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, reader), cursor);
 }
-
-// 削除（非推奨）
-// readReadCursor, writeReadCursor
 ```
 
-> **Note**: 複数エージェントが同時に `chat unread` を実行した場合、JSON ファイルの read-modify-write で競合する可能性がある。実用上は稀だが、問題が発生した場合は SQLite テーブルへの移行を検討する。
+1リーダー1ファイルなので read-modify-write の競合は発生しない。
 
 ### src/db.ts
 
@@ -197,10 +187,15 @@ export function getUnreadMessages(
     params.push(sinceId);
   }
 
-  if (opts?.channels && opts.channels.length > 0 && opts?.mentionName) {
-    const placeholders = opts.channels.map(() => "?").join(", ");
-    conds.push(`(channel IN (${placeholders}) OR content LIKE ?)`);
-    params.push(...opts.channels, `%@${opts.mentionName}%`);
+  if (opts?.mentionName) {
+    if (opts.channels && opts.channels.length > 0) {
+      const placeholders = opts.channels.map(() => "?").join(", ");
+      conds.push(`(channel IN (${placeholders}) OR content LIKE ?)`);
+      params.push(...opts.channels, `%@${opts.mentionName}%`);
+    } else {
+      conds.push("content LIKE ?");
+      params.push(`%@${opts.mentionName}%`);
+    }
   }
 
   const where = `WHERE ${conds.join(" AND ")}`;
@@ -236,7 +231,7 @@ async function cmdUnread(args: string[]) {
     process.exit(1);
   }
 
-  const cursor = readAgentCursor(chatDir, reader);
+  const cursor = readReaderCursor(chatDir, reader);
   let msgs: Message[];
 
   if (isAgent) {
@@ -247,7 +242,7 @@ async function cmdUnread(args: string[]) {
   }
 
   if (!flags.peek && msgs.length > 0) {
-    writeAgentCursor(chatDir, reader, msgs[msgs.length - 1]!.id);
+    writeReaderCursor(chatDir, reader, msgs[msgs.length - 1]!.id);
   }
 
   // ... thread context build, output (unchanged)
@@ -262,23 +257,24 @@ async function cmdUnread(args: string[]) {
     --text                        Output as human-readable text
 ```
 
-`--for` は削除。
-
 ### core.test.ts
 
 追加するテストケース:
 
 1. **Per-reader cursor isolation**: reader A の unread が reader B のカーソルに影響しない
 2. **Agent channel filtering**: 購読チャンネルのメッセージ + 非購読チャンネルからのメンションが返る
-3. **Human mode**: 全チャンネル（`_system` 除外）のメッセージが返る
-4. **Unknown reader error**: 未登録名でエラーが返る
-5. **Cursor persistence**: `.read_cursors.json` の読み書きが正しく動く
+3. **Agent with empty channels**: `channels: []` のエージェントはメンションのみ返る（全メッセージにフォールバックしない）
+4. **Human mode**: 全チャンネル（`_system` 除外）のメッセージが返る
+5. **Unknown reader error**: 未登録名でエラーが返る
+6. **Cursor persistence**: `read_cursors/` ディレクトリの読み書きが正しく動く
 
 ## Migration
 
-- 旧 `.read_cursor` は放置（新しい `.read_cursors.json` を使用）
+- 旧 `.read_cursor` は放置（新しい `read_cursors/` ディレクトリを使用）
 - 各リーダーの初回 `chat unread <name>` でカーソルが空（= 全メッセージ未読）
-- `--for` フラグは非推奨警告を出してから将来削除
+  - エージェント: onboarding フロー（Section 5）に従い、初回実行でカーソルをセットする
+  - 人間: 初回は全メッセージが返る。`--peek` で確認後に再実行してカーソルをセットするか、そのまま実行して既読にする
+- 旧 `--for` フラグは削除済み（`<reader>` 位置引数に置き換え）
 
 ## Not Changed
 

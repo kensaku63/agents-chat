@@ -1,8 +1,8 @@
 import { test, expect, beforeEach, afterEach, describe } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { openDb, createChannel, insertMessage, insertMessages, generateId, getThread, getUnreadMessages, queryMessages, parseAuthor, ensureMember, getMembers, rebuildMembers, getTasks, getMemories, getSummaries } from "./src/db";
-import { writeConfig, readReadCursor, writeReadCursor } from "./src/config";
+import { openDb, createChannel, insertMessage, insertMessages, generateId, getThread, getUnreadMessages, queryMessages, parseAuthor, ensureMember, getMembers, getAgentConfigs, rebuildMembers, getTasks, getMemories, getSummaries } from "./src/db";
+import { writeConfig, readReadCursor, writeReadCursor, readReaderCursor, writeReaderCursor } from "./src/config";
 
 function makeTmpChatDir(suffix: string): string {
   const dir = `/tmp/qqchat-test-${suffix}-${Date.now()}`;
@@ -76,7 +76,7 @@ describe("unread", () => {
     rmSync(join(chatDir, ".."), { recursive: true, force: true });
   });
 
-  test("returns all messages when no cursor", () => {
+  test("returns all non-system messages when no cursor", () => {
     const db = openDb(chatDir);
     const msgs = getUnreadMessages(db, "");
     db.close();
@@ -91,21 +91,130 @@ describe("unread", () => {
     expect(msgs[0].content).toBe("msg3");
   });
 
-  test("read cursor persists", () => {
+  test("excludes _system channel", () => {
+    const db = openDb(chatDir);
+    insertMessage(db, { id: "sys_001", channel: "_system", author: "kensaku", content: "system msg", reply_to: null });
+    const msgs = getUnreadMessages(db, "");
+    db.close();
+    expect(msgs.every(m => m.channel !== "_system")).toBe(true);
+  });
+
+  test("legacy read cursor persists", () => {
     writeReadCursor(chatDir, "bbb_002");
     const cursor = readReadCursor(chatDir);
     expect(cursor).toBe("bbb_002");
   });
 
-  test("filters by forName (mention)", () => {
+  test("agent channel filtering: subscribed channels + mentions", () => {
     const db = openDb(chatDir);
     insertMessage(db, { id: "ddd_004", channel: "general", author: "kensaku", content: "@Opus check this", reply_to: null });
-    insertMessage(db, { id: "eee_005", channel: "general", author: "agent:Opus@kensaku", content: "ok", reply_to: null });
+    insertMessage(db, { id: "eee_005", channel: "dev", author: "kensaku", content: "@Opus also this", reply_to: null });
 
-    const msgs = getUnreadMessages(db, "", "Opus");
+    const msgs = getUnreadMessages(db, "", { channels: ["general"], mentionName: "Opus" });
     db.close();
+
+    const ids = msgs.map(m => m.id);
+    expect(ids).toContain("aaa_001");
+    expect(ids).toContain("ccc_003");
+    expect(ids).toContain("ddd_004");
+    expect(ids).toContain("eee_005");
+    expect(ids).not.toContain("bbb_002");
+  });
+
+  test("agent with empty channels: mentions only", () => {
+    const db = openDb(chatDir);
+    insertMessage(db, { id: "ddd_004", channel: "general", author: "kensaku", content: "@Opus check this", reply_to: null });
+
+    const msgs = getUnreadMessages(db, "", { channels: [], mentionName: "Opus" });
+    db.close();
+
     expect(msgs.length).toBe(1);
     expect(msgs[0].content).toBe("@Opus check this");
+  });
+
+  test("human mode: all channels except _system", () => {
+    const db = openDb(chatDir);
+    insertMessage(db, { id: "sys_001", channel: "_system", author: "kensaku", content: "system", reply_to: null });
+    const msgs = getUnreadMessages(db, "");
+    db.close();
+
+    expect(msgs.length).toBe(3);
+    expect(msgs.every(m => m.channel !== "_system")).toBe(true);
+  });
+});
+
+// -------------------------------------------------------------------
+describe("per-reader cursor", () => {
+  let chatDir: string;
+
+  beforeEach(() => {
+    chatDir = makeTmpChatDir("per-reader");
+    const db = openDb(chatDir);
+    createChannel(db, "general", "General");
+    createChannel(db, "planning", "Planning");
+
+    insertMessage(db, { id: "aaa_001", channel: "general", author: "kensaku", content: "msg1", reply_to: null });
+    insertMessage(db, { id: "bbb_002", channel: "planning", author: "kensaku", content: "msg2", reply_to: null });
+    insertMessage(db, { id: "ccc_003", channel: "general", author: "kensaku", content: "msg3 @directore", reply_to: null });
+
+    ensureMember(db, "kensaku");
+    insertMessage(db, {
+      id: "agent_cfg_001", channel: "_system", author: "kensaku",
+      content: "Register agent: directore",
+      metadata: JSON.stringify({ agent_config: { name: "directore", role: "director", channels: ["planning"] } }),
+    });
+    db.close();
+  });
+
+  afterEach(() => {
+    rmSync(join(chatDir, ".."), { recursive: true, force: true });
+  });
+
+  test("cursor isolation: reader A does not affect reader B", () => {
+    writeReaderCursor(chatDir, "kensaku", "bbb_002");
+    writeReaderCursor(chatDir, "directore", "aaa_001");
+
+    expect(readReaderCursor(chatDir, "kensaku")).toBe("bbb_002");
+    expect(readReaderCursor(chatDir, "directore")).toBe("aaa_001");
+
+    writeReaderCursor(chatDir, "kensaku", "ccc_003");
+    expect(readReaderCursor(chatDir, "kensaku")).toBe("ccc_003");
+    expect(readReaderCursor(chatDir, "directore")).toBe("aaa_001");
+  });
+
+  test("cursor persistence in read_cursors/ directory", () => {
+    writeReaderCursor(chatDir, "kensaku", "aaa_001");
+    writeReaderCursor(chatDir, "directore", "bbb_002");
+
+    expect(readReaderCursor(chatDir, "kensaku")).toBe("aaa_001");
+    expect(readReaderCursor(chatDir, "directore")).toBe("bbb_002");
+    expect(readReaderCursor(chatDir, "unknown")).toBe("");
+  });
+
+  test("empty cursor returns empty string for new reader", () => {
+    expect(readReaderCursor(chatDir, "new-agent")).toBe("");
+  });
+
+  test("agent gets subscribed channels + mentions from other channels", () => {
+    const db = openDb(chatDir);
+    const agents = getAgentConfigs(db);
+    const agentConfig = agents["directore"]!;
+
+    const msgs = getUnreadMessages(db, "", { channels: agentConfig.channels, mentionName: "directore" });
+    db.close();
+
+    expect(msgs.some(m => m.channel === "planning")).toBe(true);
+    expect(msgs.some(m => m.content.includes("@directore"))).toBe(true);
+    expect(msgs.filter(m => m.channel === "general" && !m.content.includes("@directore")).length).toBe(0);
+  });
+
+  test("human gets all channels except _system", () => {
+    const db = openDb(chatDir);
+    const msgs = getUnreadMessages(db, "");
+    db.close();
+
+    expect(msgs.length).toBe(3);
+    expect(msgs.every(m => m.channel !== "_system")).toBe(true);
   });
 });
 
