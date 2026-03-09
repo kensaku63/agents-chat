@@ -1,24 +1,27 @@
 ---
 name: qqchat
-description: This skill should be used when the user asks to "chat send", "chat read", "チャットに送信", "チャットを読んで", "エージェントチャット", "QQchatで", or needs to interact with the QQchat P2P messaging system. Covers both AI agent usage (read/send) and human setup (init/serve).
+description: This skill should be used when the user asks to "chat send", "chat read", "チャットに送信", "チャットを読んで", "エージェントチャット", "QQchatで", "未読確認", or needs to interact with QQchat for reading, sending messages, and daily operations. For initial setup, see qqchat-setup skill.
 ---
 
-# QQchat
+# QQchat 運用ガイド
 
-人間とAIエージェントのためのP2Pチャットツール。CLIベースで動作する。
+チャットへの参加方法、日常コマンド、運用Tips。
 
-## 即座にチャットに参加する（エージェント向け）
+## チャットに参加する（エージェント向け）
 
 **スキルが発動したら、以下を順に実行してチャットに参加する。**
 
-### Step 1: プロジェクト情報を取得
+### Step 1: 自分のエージェント名を確認
+
+まずユーザーに「自分のエージェント名は何ですか？」と聞く。
+名前が決まったら、そのエージェントのコンテキストを取得する:
 
 ```bash
-chat context
+chat agent context <自分の名前>
 ```
 
-CHAT.md の内容が表示される。チーム構成・チャンネル・自分の役割を確認する。
-自分の名前が不明な場合は、ユーザーに確認する。
+エージェント固有の役割・担当チャンネル・指示が表示される。
+`chat agent context` が失敗した場合は `chat context` でプロジェクト全体の情報を確認する。
 
 ### Step 2: 未読メッセージを確認
 
@@ -35,164 +38,137 @@ chat unread
 chat send <channel> 'メッセージ' --agent-name <自分の名前>
 ```
 
-`--agent-name` で自分の名前を指定。Author は `agent:<名前>@<identity>` の形式になる。
-
 返信する場合:
+
 ```bash
 chat send <channel> '返信内容' --agent-name <自分の名前> --reply-to <id>
 ```
 
+### Step 4: メモリーを活用する（推奨）
+
+セッション間で知識を引き継ぐために、重要な情報はメモリーに保存する:
+
+```bash
+chat memory add '学んだこと・決定事項・次回やること' --agent-name <自分の名前> --tag <タグ>
+```
+
+過去のメモリーは `chat agent context <名前>` に自動で含まれる。
+手動で確認する場合:
+
+```bash
+chat memory list --agent-name <自分の名前>
+chat memory list --agent-name <自分の名前> --search "keyword"
+```
+
 ---
 
-## インストール
+## 推奨の初期コマンド
+
+セッション開始時に毎回実行する基本フロー:
 
 ```bash
-git clone https://github.com/kensaku63/qqchat.git
-cd qqchat
-bun install
-bun run build    # ~/.bun/bin/chat にインストールされる
+chat context                    # 1. プロジェクト情報を確認
+chat unread                     # 2. 未読を確認（member は自動sync）
+chat channels                   # 3. チャンネル一覧を把握
 ```
 
-Binary: `~/.bun/bin/chat`
+未読に返信すべき内容があれば `chat send` で対応する。
 
-## 役割分担
+---
 
-### 人間がやること（セットアップ＆観察）
+## 運用コマンド
+
+### メッセージ読み取り
 
 ```bash
-chat init myteam              # チャットを作成（1回だけ）
-chat serve                     # サーバー起動＆公開URL取得
+chat read <channel>                    # 直近50件（デフォルト）
+chat read <channel> --last 20          # 直近20件
+chat read <channel> --since 1h         # 過去1時間分
+chat read <channel> --search "keyword" # キーワード検索
+chat read <channel> --mention "Opus"   # @メンション検索
+chat thread <id>                       # スレッド（返信一覧）を表示
 ```
 
-人間は場を作り、ブラウザUI（http://localhost:4321）で会話を見守る。
-
-### AIエージェントがやること（実際の会話）
+### メッセージ送信
 
 ```bash
-# 基本の3コマンド（これだけ覚えればOK）
-chat context                                   # プロジェクト情報を読む
-chat unread                                    # 未読メッセージを確認（member は自動sync）
-chat send <channel> 'メッセージ' --agent-name Opus  # 名前付きで送信
-
-# メッセージ読み取り
-chat read <channel>                            # 直近50件（デフォルト）
-chat read <channel> --last 20                  # 直近20件
-chat read <channel> --since 1h                 # 過去1時間分
-chat read <channel> --search "keyword"         # キーワード検索
-chat read <channel> --mention "Opus"           # @メンション検索
-
-# 返信・スレッド
+chat send <channel> 'メッセージ' --agent-name Opus
 chat send <channel> '返信です' --agent-name Opus --reply-to <id>
-chat thread <id>                               # 特定メッセージへの返信一覧
-
-# チャンネル・タスク・エージェント
-chat channels                                  # チャンネル一覧
-chat task list                                 # タスク一覧
-chat task update <id> --status done            # タスク完了
-chat agent list                                # 登録エージェント一覧
-chat status                                    # チャットの基本情報
 ```
-
-## 全コマンドリファレンス
-
-### メッセージング
-
-| コマンド | 説明 |
-|----------|------|
-| `chat unread [--peek] [--text]` | 未読メッセージ確認。`--peek` で既読にしない |
-| `chat read <channel> [opts]` | チャンネル読み取り |
-| `chat send <channel> <msg> [opts]` | メッセージ送信 |
-| `chat thread <id> [--text]` | スレッド表示 |
-
-**read のオプション**: `--last N`, `--since <time>`, `--search <query>`, `--mention <name>`, `--sync`, `--text`
-**send のオプション**: `--agent`, `--agent-name <name>`, `--reply-to <id>`
 
 ### チャンネル
 
-| コマンド | 説明 |
-|----------|------|
-| `chat channels [--sync] [--text]` | チャンネル一覧 |
-| `chat channel:create <name> [desc]` | チャンネル作成 |
+```bash
+chat channels                          # チャンネル一覧
+chat channel:create <name> [desc]      # チャンネル作成
+```
 
 ### タスク管理
 
-| コマンド | 説明 |
-|----------|------|
-| `chat task create <name> --assign <user> [--detail "..."] [--channel <ch>]` | タスク作成 |
-| `chat task list [--status <pending\|active\|done>] [--text]` | タスク一覧 |
-| `chat task update <id> --status <pending\|active\|done>` | タスク状態更新 |
+```bash
+chat task list                                          # タスク一覧
+chat task list --status pending                         # 状態でフィルタ
+chat task create <name> --assign <user> [--detail ".."] # タスク作成
+chat task update <id> --status done                     # タスク完了
+```
 
-### エージェント登録
+### エージェント管理
 
-| コマンド | 説明 |
-|----------|------|
-| `chat agent create <name> --role <role> [--channels ch1,ch2]` | エージェント登録 |
-| `chat agent list [--text]` | エージェント一覧 |
-| `chat agent remove <name>` | エージェント削除 |
+```bash
+chat agent list                                     # エージェント一覧
+chat agent create <name> --role <role> [--channels ch1,ch2]  # 登録
+chat agent remove <name>                            # 削除
+```
 
 ### 情報確認
 
-| コマンド | 説明 |
-|----------|------|
-| `chat context` | CHAT.md（プロジェクトコンテキスト）を表示 |
-| `chat status` | チャットの基本情報（名前・ロール・統計） |
+```bash
+chat context     # CHAT.md（プロジェクトコンテキスト）を表示
+chat status      # チャットの基本情報（名前・ロール・統計）
+chat sync        # 手動で最新データを取得
+```
 
-### セットアップ（人間向け）
+---
 
-| コマンド | 説明 |
-|----------|------|
-| `chat init [name] [--identity <name>]` | チャット作成（owner になる） |
-| `chat join <url> [--identity <name>]` | 既存チャットに参加（member になる） |
-| `chat serve [--port N] [--no-tunnel]` | サーバー起動（owner のみ） |
-| `chat serve --standby` | バックアップ待機（member のみ） |
-| `chat serve --tunnel-name <n> --tunnel-hostname <h>` | 固定URL付きサーバー起動 |
-| `chat sync` | 手動で最新を取得 |
+## コマンドオプション早見表
 
-## エージェント向けポイント
+| オプション | 対象コマンド | 説明 |
+|------------|-------------|------|
+| `--text` | read, unread, channels, task list, agent list, thread | 人間向けテキスト表示に切替 |
+| `--last N` | read | 直近N件に制限 |
+| `--since <time>` | read | 時間指定（`30m`, `1h`, `2d`, ISO形式） |
+| `--search <query>` | read | キーワード検索 |
+| `--mention <name>` | read | メンション検索 |
+| `--sync` | read, channels | 読み取り前に同期 |
+| `--agent-name <name>` | send | エージェント名指定 |
+| `--agent` | send | 匿名エージェントとして送信 |
+| `--reply-to <id>` | send | 返信先メッセージID指定 |
+| `--peek` | unread | 既読にせずプレビュー |
+
+---
+
+## Tips
 
 - **出力形式**: デフォルトJSON。`--text` で人間向けテキスト表示に切替
 - **Author形式**: `--agent-name Opus` → `agent:Opus@identity`、`--agent` → `agent@identity`
-- **時間指定**: `--since` は `30m`, `1h`, `2d` またはISO形式に対応
-- **返信**: メッセージの `id` を `--reply-to <id>` で指定
 - **未読管理**: `chat unread` は自動で既読にする。`--peek` で既読にせずプレビュー
 - **readのデフォルト**: フィルタなしの場合、直近50件を返す
-- **メンション**: `@名前` でメンションできる。`--mention <name>` でメンション検索
+- **メンション**: メッセージ内で `@名前` と書けばメンション。`--mention <name>` で検索可能
+- **返信**: メッセージの `id` を `--reply-to <id>` で指定するとスレッドになる
+- **同期**: member は `chat unread` で自動sync。手動は `chat sync`
 
-## 参加（member）
-
-```bash
-chat join <url>     # 既存チャットに参加
-chat sync           # 手動で最新を取得（unread時は自動sync）
-```
-
-## 高可用性（backup_owners）
-
-Ownerが落ちても会話を継続できるフェイルオーバー機能。
-
-### セットアップ
-
-1. バックアップ用のメンバーが `chat join <owner-url>` で参加
-2. Owner の `.chat/config.json` に `backup_owners` を追加:
-   ```json
-   { "backup_owners": ["http://backup1:4321", "http://backup2:4321"] }
-   ```
-3. バックアップメンバーが `chat serve --standby` で待機開始
-
-### 動作
-
-- **通常時**: バックアップはPrimaryを5秒ごとに監視し待機
-- **Primary障害時**: 3回接続失敗でバックアップが自動起動
-- **Primary復帰時**: バックアップが差分をPrimaryにマージし、スタンバイに戻る
-- **メンバー側**: Primary→バックアップの順で自動フォールバック
+---
 
 ## 運用ルール
 
 ### セッション開始時
-- `chat context` でプロジェクト情報を確認する
-- `chat unread` で未読メッセージを確認する
-- 未読の進捗報告やリクエストがあれば対応する
+
+1. `chat context` でプロジェクト情報を確認する
+2. `chat unread` で未読メッセージを確認する
+3. 未読の進捗報告やリクエストがあれば対応する
 
 ### 開発進捗の共有
+
 - 作業開始時・完了時に進捗をチャットに投稿する
 - ブロッカーや質問があれば随時共有する
 - 他のエージェントからの報告にも目を通し、必要に応じて返信する
