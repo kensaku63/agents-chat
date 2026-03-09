@@ -897,6 +897,55 @@
       margin-right: 4px;
       vertical-align: middle;
     }
+
+    /* Search bar */
+    #search-bar {
+      display: none;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--border);
+      background: #fafafa;
+    }
+    #search-bar.visible { display: flex; gap: 8px; align-items: center; }
+    #search-input {
+      flex: 1;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    #search-input:focus { border-color: var(--accent); }
+    #search-count { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+    #search-close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 16px;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    #search-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 14px;
+      cursor: pointer;
+      padding: 4px 8px;
+      margin-left: auto;
+    }
+    #search-btn:hover { color: var(--text); }
+    .message.search-hidden { display: none; }
+    .search-highlight { background: #fef3c7; }
+
+    /* Inline confirm */
+    .inline-confirm {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
+      padding: 6px 0;
+    }
   </style>
 </head>
 <body>
@@ -933,7 +982,13 @@
         <button id="mobile-menu-btn">&#9776;</button>
         <span id="channel-header-name">general</span>
         <span id="channel-header-desc"></span>
+        <button id="search-btn" title="Search messages">&#x1F50D;</button>
       </header>
+      <div id="search-bar">
+        <input type="text" id="search-input" placeholder="Search messages..." />
+        <span id="search-count"></span>
+        <button id="search-close-btn">&times;</button>
+      </div>
       <div id="messages"></div>
       <div id="tasks-panel" class="panel" style="display:none">
         <div class="panel-header">
@@ -1438,6 +1493,13 @@
           return '<span class="ref-link" data-ref="' + id + '">[ref:' + id.slice(-6) + ']</span>';
         }
       );
+      // URL → clickable link (before @mention to avoid matching URLs containing @)
+      escaped = escaped.replace(
+        /(https?:\/\/[^\s<&]+)/g,
+        function(url) {
+          return '<a href="' + url + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;">' + url + '</a>';
+        }
+      );
       // @mention → highlight
       escaped = escaped.replace(
         /@([\w\-\.]+)/g,
@@ -1446,6 +1508,9 @@
           return '<span class="mention' + (isMe ? ' me' : '') + '">' + match + '</span>';
         }
       );
+      // Basic markdown: **bold**, `code`
+      escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      escaped = escaped.replace(/`([^`]+)`/g, '<code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:13px;">$1</code>');
       content.innerHTML = escaped;
 
       // Body
@@ -1823,9 +1888,21 @@
 
       sections.forEach(function(s) {
         if (grouped[s.key].length === 0) return;
-        content.appendChild(el('div', { className: 'section-label' }, [
+        let label = el('div', { className: 'section-label' + (s.key === 'done' ? ' collapsible-section' : '') }, [
           s.label + ' (' + grouped[s.key].length + ')'
-        ]));
+        ]);
+        content.appendChild(label);
+        let sectionContainer = el('div', {});
+        if (s.key === 'done') {
+          sectionContainer.style.display = 'none';
+          label.style.cursor = 'pointer';
+          label.addEventListener('click', function() {
+            let isHidden = sectionContainer.style.display === 'none';
+            sectionContainer.style.display = isHidden ? '' : 'none';
+            label.textContent = (isHidden ? '\u25BC' : '\u25B6') + ' Done (' + grouped[s.key].length + ')';
+          });
+          label.textContent = '\u25B6 Done (' + grouped[s.key].length + ')';
+        }
         grouped[s.key].forEach(function(t) {
           let statusSelect = el('select', { className: 'status-select' });
           statusSelect.setAttribute('data-task-id', t.id);
@@ -1849,8 +1926,9 @@
           if (t.detail) {
             cardChildren.push(el('div', { className: 'card-detail' }, [t.detail]));
           }
-          content.appendChild(el('div', { className: 'card task-' + t.status }, cardChildren));
+          sectionContainer.appendChild(el('div', { className: 'card task-' + t.status }, cardChildren));
         });
+        content.appendChild(sectionContainer);
       });
     }
 
@@ -2018,10 +2096,26 @@
       await fetchAndRenderAgentsPanel();
     }
 
-    async function deleteAgent(name) {
-      if (!confirm('Delete agent "' + name + '"?')) return;
-      await fetch('/api/agents/' + encodeURIComponent(name), { method: 'DELETE' });
-      await fetchAndRenderAgentsPanel();
+    function deleteAgent(name) {
+      let card = document.querySelector('[data-edit-agent="' + name + '"]');
+      if (!card) return;
+      let actionsDiv = card.closest('.card-body').querySelector('.card-actions');
+      if (!actionsDiv || actionsDiv.querySelector('.inline-confirm')) return;
+
+      let confirmRow = el('div', { className: 'inline-confirm' }, [
+        el('span', { className: 'field-label' }, ['Delete "' + name + '"? ']),
+        el('button', { className: 'btn-sm btn-danger' }, ['Yes, delete']),
+        el('button', { className: 'btn-sm' }, ['Cancel']),
+      ]);
+      actionsDiv.appendChild(confirmRow);
+
+      confirmRow.children[1].addEventListener('click', async function() {
+        await fetch('/api/agents/' + encodeURIComponent(name), { method: 'DELETE' });
+        await fetchAndRenderAgentsPanel();
+      });
+      confirmRow.children[2].addEventListener('click', function() {
+        confirmRow.remove();
+      });
     }
 
     async function loadAgentMemories(agentName) {
@@ -2053,6 +2147,56 @@
         let tagStr = m.tags && m.tags.length > 0 ? ' [' + m.tags.join(', ') + ']' : '';
         contentEl.appendChild(el('div', { className: 'memory-item' }, ['\u2022 ' + m.content + tagStr]));
       });
+
+      if (!state.publicRead) {
+        let addBtn = el('button', { className: 'btn-sm' }, ['+ Add Memory']);
+        addBtn.style.marginTop = '6px';
+        addBtn.addEventListener('click', function() {
+          if (contentEl.querySelector('.memory-add-form')) return;
+          let form = el('div', { className: 'memory-add-form' });
+          form.style.marginTop = '8px';
+          let input = el('textarea', { className: 'form-input', placeholder: 'Memory content', rows: '2' });
+          input.style.resize = 'vertical';
+          input.style.fontSize = '12px';
+          let tagSelect = el('select', { className: 'form-input' });
+          tagSelect.style.flex = '0 0 auto';
+          tagSelect.style.minWidth = '100px';
+          ['context', 'decision', 'pattern'].forEach(function(t) {
+            tagSelect.appendChild(el('option', { value: t }, [t]));
+          });
+          let saveBtn = el('button', { className: 'btn-primary' }, ['Save']);
+          saveBtn.style.fontSize = '11px';
+          saveBtn.style.padding = '4px 10px';
+          let cancelBtn = el('button', { className: 'btn-secondary' }, ['Cancel']);
+          cancelBtn.style.fontSize = '11px';
+          cancelBtn.style.padding = '4px 10px';
+          form.appendChild(input);
+          form.appendChild(el('div', { className: 'form-row' }, [tagSelect, saveBtn, cancelBtn]));
+          form.querySelector('.form-row').style.marginTop = '4px';
+          contentEl.appendChild(form);
+          input.focus();
+
+          saveBtn.addEventListener('click', async function() {
+            let text = input.value.trim();
+            if (!text) return;
+            let tag = tagSelect.value;
+            await fetch('/api/messages', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                channel: '_system',
+                author: state.identity,
+                content: text,
+                metadata: JSON.stringify({ memory: { agent: agentName, tags: [tag] } }),
+              }),
+            });
+            form.remove();
+            loadAgentMemories(agentName);
+          });
+          cancelBtn.addEventListener('click', function() { form.remove(); });
+        });
+        contentEl.appendChild(addBtn);
+      }
     }
 
     // --- Channels Panel ---
@@ -2379,6 +2523,58 @@
       document.getElementById('sidebar').classList.remove('open');
       document.getElementById('sidebar-overlay').classList.remove('visible');
     }
+
+    // --- Search ---
+
+    document.getElementById('search-btn').addEventListener('click', function() {
+      let bar = document.getElementById('search-bar');
+      if (bar.classList.contains('visible')) {
+        closeSearch();
+      } else {
+        bar.classList.add('visible');
+        document.getElementById('search-input').focus();
+      }
+    });
+
+    document.getElementById('search-close-btn').addEventListener('click', closeSearch);
+
+    function closeSearch() {
+      document.getElementById('search-bar').classList.remove('visible');
+      document.getElementById('search-input').value = '';
+      document.getElementById('search-count').textContent = '';
+      clearSearchFilter();
+    }
+
+    function clearSearchFilter() {
+      document.querySelectorAll('.message.search-hidden').forEach(function(m) {
+        m.classList.remove('search-hidden');
+      });
+    }
+
+    document.getElementById('search-input').addEventListener('input', function() {
+      let query = this.value.trim().toLowerCase();
+      if (!query) {
+        clearSearchFilter();
+        document.getElementById('search-count').textContent = '';
+        return;
+      }
+      let messages = document.getElementById('messages').querySelectorAll('.message');
+      let matchCount = 0;
+      messages.forEach(function(m) {
+        let text = m.textContent.toLowerCase();
+        if (text.includes(query)) {
+          m.classList.remove('search-hidden');
+          matchCount++;
+        } else {
+          m.classList.add('search-hidden');
+        }
+      });
+      document.getElementById('search-count').textContent = matchCount + ' found';
+    });
+
+    document.getElementById('search-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeSearch();
+    });
 
     // --- Init ---
 
