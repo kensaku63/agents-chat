@@ -722,6 +722,128 @@
 
     /* Header no-hash mode */
     #channel-header-name.no-hash::before { content: none; }
+
+    /* Channel header description */
+    #channel-header-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-left: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Welcome overlay */
+    #welcome-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    #welcome-box {
+      background: #fff;
+      border-radius: 12px;
+      padding: 32px;
+      width: 340px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      text-align: center;
+    }
+    #welcome-box h2 { font-size: 20px; margin-bottom: 8px; color: var(--text); }
+    #welcome-box p { font-size: 14px; color: var(--text-muted); margin-bottom: 20px; }
+    #welcome-name-input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      margin-bottom: 12px;
+    }
+    #welcome-name-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1); }
+    #welcome-join-btn {
+      width: 100%;
+      padding: 10px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    #welcome-join-btn:hover { background: var(--accent-hover); }
+
+    /* Inline identity editing */
+    #identity-edit-row {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      width: 100%;
+    }
+    #identity-edit-input {
+      flex: 1;
+      padding: 3px 6px;
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 3px;
+      font-size: 11px;
+      background: transparent;
+      color: var(--sidebar-text);
+      outline: none;
+      font-family: inherit;
+    }
+    #identity-edit-input:focus { border-color: var(--accent); }
+    .identity-edit-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+      padding: 2px 4px;
+    }
+    .identity-edit-btn:hover { color: var(--sidebar-text); }
+
+    /* Mention item role info */
+    .mention-item-role {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+    .mention-role-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+
+    /* Shortcut hints */
+    #shortcut-hints {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 4px 0 0;
+    }
+
+    /* Unread badge */
+    .unread-badge {
+      background: var(--accent);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      border-radius: 10px;
+      padding: 1px 6px;
+      margin-left: auto;
+      min-width: 18px;
+      text-align: center;
+      display: none;
+    }
+    .channel-item { display: flex; align-items: center; }
+    .channel-item-name { flex: 1; }
   </style>
 </head>
 <body>
@@ -747,6 +869,11 @@
         <span>&#x1F464;</span>
         <span id="identity-label"></span>
         <button id="identity-change-btn">Change</button>
+        <div id="identity-edit-row">
+          <input type="text" id="identity-edit-input" />
+          <button class="identity-edit-btn" id="identity-save-btn">&#x2713;</button>
+          <button class="identity-edit-btn" id="identity-cancel-btn">&#x2717;</button>
+        </div>
       </div>
       <div id="status-bar">
         <span class="status-dot connecting"></span>
@@ -757,6 +884,7 @@
       <header id="channel-header" style="display:flex;align-items:center;">
         <button id="mobile-menu-btn">&#9776;</button>
         <span id="channel-header-name">general</span>
+        <span id="channel-header-desc"></span>
       </header>
       <div id="messages"></div>
       <div id="tasks-panel" class="panel" style="display:none">
@@ -773,7 +901,7 @@
             <select id="task-channel-input" class="form-input"></select>
           </div>
           <div class="form-row">
-            <input type="text" id="task-detail-input" class="form-input" placeholder="Detail (optional)" />
+            <textarea id="task-detail-input" class="form-input" placeholder="Detail (optional)" rows="3" style="resize:vertical;"></textarea>
           </div>
           <div class="form-actions">
             <button class="btn-primary" id="task-submit-btn">Create</button>
@@ -790,10 +918,21 @@
         <div id="agent-form" class="panel-form" style="display:none">
           <div class="form-row">
             <input type="text" id="agent-name-input" class="form-input" placeholder="Agent name *" />
-            <input type="text" id="agent-role-input" class="form-input" placeholder="Role (optional)" />
+            <select id="agent-role-select" class="form-input" style="min-width:140px;">
+              <option value="">Role (optional)</option>
+              <option value="builder">&#x25CF; builder</option>
+              <option value="reviewer">&#x25CF; reviewer</option>
+              <option value="director">&#x25CF; director</option>
+              <option value="ideator">&#x25CF; ideator</option>
+              <option value="planner">&#x25CF; planner</option>
+              <option value="marketer">&#x25CF; marketer</option>
+              <option value="developer">&#x25CF; developer</option>
+              <option value="_custom">Other...</option>
+            </select>
+            <input type="text" id="agent-role-custom" class="form-input" placeholder="Custom role" style="display:none;" />
           </div>
           <div class="form-row">
-            <input type="text" id="agent-desc-input" class="form-input" placeholder="Description (optional)" />
+            <textarea id="agent-desc-input" class="form-input" placeholder="Description (optional)" rows="3" style="resize:vertical;"></textarea>
           </div>
           <div class="form-row">
             <input type="text" id="agent-channels-input" class="form-input" placeholder="Channels (comma separated)" />
@@ -848,6 +987,7 @@
           <textarea id="message-input" placeholder="Type a message... (@ to mention, Shift+Enter for newline)" rows="1" autocomplete="off"></textarea>
           <button id="send-btn">Send</button>
         </div>
+        <div id="shortcut-hints">Enter: send / Shift+Enter: newline / @: mention</div>
       </div>
     </main>
   </div>
@@ -872,6 +1012,8 @@
       tasks: [],
       editingAgent: null,
       editingChannel: null,
+      unreadCounts: {},
+      needsWelcome: false,
     };
 
     // --- Helpers ---
@@ -956,12 +1098,11 @@
       } else {
         let saved = localStorage.getItem('qqchat-identity');
         if (!saved) {
-          saved = prompt('Enter your display name:') || '';
-          saved = saved.trim() || 'anonymous';
-          localStorage.setItem('qqchat-identity', saved);
+          state.needsWelcome = true;
+        } else {
+          state.identity = saved;
+          document.getElementById('identity-label').textContent = saved;
         }
-        state.identity = saved;
-        document.getElementById('identity-label').textContent = saved;
       }
 
       document.getElementById('chat-name').textContent = data.name;
@@ -1112,6 +1253,11 @@
             fetchChannels();
           }
           state.messages.push(data);
+          // Track unread for non-current channels
+          if (data.channel !== state.currentChannel || state.currentView !== 'chat') {
+            state.unreadCounts[data.channel] = (state.unreadCounts[data.channel] || 0) + 1;
+            renderChannels();
+          }
           if (data.channel === state.currentChannel && state.currentView === 'chat') {
             let wasAtBottom = isScrolledToBottom();
             appendMessage(data);
@@ -1149,14 +1295,22 @@
       let list = document.getElementById('channel-list');
       while (list.firstChild) list.removeChild(list.firstChild);
       state.channels.forEach(function(ch) {
+        let badge = el('span', { className: 'unread-badge' });
+        badge.setAttribute('data-unread-ch', ch.name);
+        let count = state.unreadCounts[ch.name] || 0;
+        if (count > 0) {
+          badge.textContent = count > 99 ? '99+' : count;
+          badge.style.display = '';
+        }
         let item = el('div', {
           className: 'channel-item' + (ch.name === state.currentChannel && state.currentView === 'chat' ? ' active' : ''),
+          title: ch.description || '',
         }, [
-          ch.name,
+          el('span', { className: 'channel-item-name' }, [ch.name]),
           ch.status ? el('span', {
             className: 'channel-status ' + ch.status,
-            title: (ch.description || '') + ' (' + ch.status + ')',
           }) : null,
+          badge,
         ]);
         item.addEventListener('click', function() { switchChannel(ch.name); });
         list.appendChild(item);
@@ -1179,20 +1333,35 @@
 
     function switchChannel(name) {
       state.currentChannel = name;
+      state.unreadCounts[name] = 0;
       switchView('chat');
       renderMessages();
+      updateChannelHeaderDesc();
       cancelReply();
       closeMobileSidebar();
       document.getElementById('message-input').focus();
     }
 
+    function updateChannelHeaderDesc() {
+      let descEl = document.getElementById('channel-header-desc');
+      let ch = state.channels.find(function(c) { return c.name === state.currentChannel; });
+      descEl.textContent = (ch && ch.description) ? ch.description : '';
+    }
+
     function createMessageEl(msg) {
       let agent = isAgent(msg.author);
 
-      // Avatar
+      // Avatar with role color
       let avatar = el('div', { className: 'msg-avatar ' + (agent ? 'agent' : 'human') }, [
         getInitials(msg.author)
       ]);
+      if (agent) {
+        let agentName = getDisplayName(msg.author);
+        let agentInfo = state.agents[agentName];
+        if (agentInfo && agentInfo.role) {
+          avatar.style.background = getRoleColor(agentInfo.role);
+        }
+      }
 
       // Reply reference
       let replyRef = null;
@@ -1414,9 +1583,23 @@
 
     function getMentionCandidates(query) {
       let q = query.toLowerCase();
-      return state.members.filter(function(m) {
-        return m.toLowerCase().startsWith(q);
-      }).slice(0, 8);
+      // Build unique candidate list from members + agent names
+      let seen = {};
+      let candidates = [];
+      // Add human members
+      state.members.forEach(function(m) {
+        if (!seen[m]) { seen[m] = true; candidates.push({ name: m, role: null }); }
+      });
+      // Add agent names from state.agents
+      Object.keys(state.agents).forEach(function(agentName) {
+        if (!seen[agentName]) {
+          seen[agentName] = true;
+          candidates.push({ name: agentName, role: state.agents[agentName].role || null });
+        }
+      });
+      return candidates.filter(function(c) {
+        return c.name.toLowerCase().includes(q);
+      }).slice(0, 10);
     }
 
     function showMentionPopup(candidates) {
@@ -1428,14 +1611,22 @@
         return;
       }
 
-      candidates.forEach(function(name, i) {
-        let item = el('div', { className: 'mention-item' + (i === state.mentionSelectedIdx ? ' selected' : '') }, [
-          el('div', { className: 'mention-item-avatar' }, [name.slice(0, 2).toUpperCase()]),
-          el('span', {}, ['@' + name]),
-        ]);
+      candidates.forEach(function(c, i) {
+        let avatarEl = el('div', { className: 'mention-item-avatar' }, [c.name.slice(0, 2).toUpperCase()]);
+        if (c.role) avatarEl.style.background = getRoleColor(c.role);
+        let children = [
+          avatarEl,
+          el('span', {}, ['@' + c.name]),
+        ];
+        if (c.role) {
+          let dot = el('span', { className: 'mention-role-dot' });
+          dot.style.background = getRoleColor(c.role);
+          children.push(el('span', { className: 'mention-item-role' }, [dot, c.role]));
+        }
+        let item = el('div', { className: 'mention-item' + (i === state.mentionSelectedIdx ? ' selected' : '') }, children);
         item.addEventListener('mousedown', function(e) {
           e.preventDefault();
-          insertMention(name);
+          insertMention(c.name);
         });
         popup.appendChild(item);
       });
@@ -1484,7 +1675,7 @@
           e.preventDefault();
           let candidates = getMentionCandidates(state.mentionQuery || '');
           if (candidates[state.mentionSelectedIdx]) {
-            insertMention(candidates[state.mentionSelectedIdx]);
+            insertMention(candidates[state.mentionSelectedIdx].name);
           }
           return;
         }
@@ -1511,22 +1702,9 @@
 
     document.getElementById('send-btn').addEventListener('click', sendMessage);
 
-    document.getElementById('add-channel-btn').addEventListener('click', async function() {
-      let name = prompt('Enter channel name:');
-      if (!name) return;
-      name = name.trim().toLowerCase().replace(/\s+/g, '-');
-      if (!name) return;
-
-      let desc = prompt('Description (optional):') || '';
-
-      await fetch('/api/channels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name, description: desc }),
-      });
-
-      await fetchChannels();
-      switchChannel(name);
+    document.getElementById('add-channel-btn').addEventListener('click', function() {
+      switchView('channels');
+      openChannelForm(null);
     });
 
     // --- View Management ---
@@ -1547,13 +1725,16 @@
       if (panelMap[view]) document.getElementById(panelMap[view]).style.display = '';
 
       let headerName = document.getElementById('channel-header-name');
+      let headerDesc = document.getElementById('channel-header-desc');
       if (isChat) {
         headerName.textContent = state.currentChannel;
         headerName.classList.remove('no-hash');
+        updateChannelHeaderDesc();
       } else {
         let titles = { tasks: 'Tasks', agents: 'Agents', channels: 'Channels', context: 'Chat Context' };
         headerName.textContent = titles[view];
         headerName.classList.add('no-hash');
+        headerDesc.textContent = '';
       }
 
       document.querySelectorAll('.nav-item').forEach(function(item) {
@@ -1724,8 +1905,10 @@
         memContent.setAttribute('data-memory-content', name);
         memContent.style.display = 'none';
 
+        let cardHeader = el('div', { className: 'card-header' }, [avatar, el('span', { className: 'card-title' }, [name])]);
+        if (info.role) addRoleBadge(cardHeader, info.role);
         let card = el('div', { className: 'card' }, [
-          el('div', { className: 'card-header' }, [avatar, el('span', { className: 'card-title' }, [name])]),
+          cardHeader,
           cardBody,
           memToggle,
           memContent,
@@ -1738,7 +1921,19 @@
       document.getElementById('agent-form').style.display = '';
       document.getElementById('agent-name-input').value = agentData ? agentData.name : '';
       document.getElementById('agent-name-input').readOnly = !!agentData;
-      document.getElementById('agent-role-input').value = agentData ? (agentData.role || '') : '';
+      let roleSelect = document.getElementById('agent-role-select');
+      let roleCustom = document.getElementById('agent-role-custom');
+      let roleVal = agentData ? (agentData.role || '') : '';
+      let knownRoles = Object.keys(ROLE_COLORS);
+      if (roleVal && knownRoles.indexOf(roleVal) === -1) {
+        roleSelect.value = '_custom';
+        roleCustom.value = roleVal;
+        roleCustom.style.display = '';
+      } else {
+        roleSelect.value = roleVal;
+        roleCustom.value = '';
+        roleCustom.style.display = 'none';
+      }
       document.getElementById('agent-desc-input').value = agentData ? (agentData.description || '') : '';
       document.getElementById('agent-channels-input').value = agentData ? (agentData.channels || []).join(', ') : '';
       state.editingAgent = agentData ? agentData.name : null;
@@ -1747,16 +1942,24 @@
     function clearAgentForm() {
       document.getElementById('agent-name-input').value = '';
       document.getElementById('agent-name-input').readOnly = false;
-      document.getElementById('agent-role-input').value = '';
+      document.getElementById('agent-role-select').value = '';
+      document.getElementById('agent-role-custom').value = '';
+      document.getElementById('agent-role-custom').style.display = 'none';
       document.getElementById('agent-desc-input').value = '';
       document.getElementById('agent-channels-input').value = '';
       state.editingAgent = null;
     }
 
+    function getAgentRoleValue() {
+      let select = document.getElementById('agent-role-select');
+      if (select.value === '_custom') return document.getElementById('agent-role-custom').value.trim();
+      return select.value;
+    }
+
     async function saveAgent() {
       let name = document.getElementById('agent-name-input').value.trim();
       if (!name) return;
-      let role = document.getElementById('agent-role-input').value.trim();
+      let role = getAgentRoleValue();
       let desc = document.getElementById('agent-desc-input').value.trim();
       let channelsStr = document.getElementById('agent-channels-input').value.trim();
       let channels = channelsStr ? channelsStr.split(',').map(function(s) { return s.trim().replace(/^#/, ''); }).filter(Boolean) : [];
@@ -2063,16 +2266,68 @@
       }
     });
 
-    document.getElementById('identity-change-btn').addEventListener('click', async function() {
-      let current = state.identity;
-      let newName = prompt('Enter new display name:', current);
-      if (newName === null) return;
-      newName = newName.trim() || current;
+    // Inline identity editing
+    document.getElementById('identity-change-btn').addEventListener('click', function() {
+      document.getElementById('identity-label').style.display = 'none';
+      document.getElementById('identity-change-btn').style.display = 'none';
+      let editRow = document.getElementById('identity-edit-row');
+      let editInput = document.getElementById('identity-edit-input');
+      editRow.style.display = 'flex';
+      editInput.value = state.identity;
+      editInput.focus();
+      editInput.select();
+    });
+
+    async function saveIdentity() {
+      let editInput = document.getElementById('identity-edit-input');
+      let newName = editInput.value.trim() || state.identity;
+      let oldName = state.identity;
       state.identity = newName;
       localStorage.setItem('qqchat-identity', newName);
       document.getElementById('identity-label').textContent = newName;
-      await registerMember(newName, current);
+      document.getElementById('identity-label').style.display = '';
+      document.getElementById('identity-change-btn').style.display = '';
+      document.getElementById('identity-edit-row').style.display = 'none';
+      if (newName !== oldName) {
+        await registerMember(newName, oldName);
+        await fetchMembers();
+      }
+    }
+
+    function cancelIdentityEdit() {
+      document.getElementById('identity-label').style.display = '';
+      document.getElementById('identity-change-btn').style.display = '';
+      document.getElementById('identity-edit-row').style.display = 'none';
+    }
+
+    document.getElementById('identity-save-btn').addEventListener('click', saveIdentity);
+    document.getElementById('identity-cancel-btn').addEventListener('click', cancelIdentityEdit);
+    document.getElementById('identity-edit-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); saveIdentity(); }
+      if (e.key === 'Escape') { cancelIdentityEdit(); }
     });
+
+    // Agent role select - show custom input when "Other..." selected
+    document.getElementById('agent-role-select').addEventListener('change', function() {
+      let custom = document.getElementById('agent-role-custom');
+      if (this.value === '_custom') {
+        custom.style.display = '';
+        custom.focus();
+      } else {
+        custom.style.display = 'none';
+        custom.value = '';
+      }
+    });
+
+    // Agent role badge color in card header
+    function addRoleBadge(headerEl, role) {
+      if (!role) return;
+      let dot = el('span', { className: 'mention-role-dot' });
+      dot.style.background = getRoleColor(role);
+      let badge = el('span', { className: 'mention-item-role' }, [dot, role]);
+      badge.style.marginLeft = '8px';
+      headerEl.appendChild(badge);
+    }
 
     // --- Mobile sidebar ---
 
@@ -2093,10 +2348,44 @@
 
     // --- Init ---
 
+    function showWelcomeOverlay() {
+      let overlay = el('div', { id: 'welcome-overlay' });
+      let box = el('div', { id: 'welcome-box' }, [
+        el('h2', {}, ['Welcome to ' + state.chatName]),
+        el('p', {}, ['Enter your display name to join']),
+        el('input', { id: 'welcome-name-input', placeholder: 'Your name' }),
+        el('button', { id: 'welcome-join-btn' }, ['Join']),
+      ]);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+
+      let input = document.getElementById('welcome-name-input');
+      input.focus();
+
+      async function joinWithName() {
+        let name = input.value.trim();
+        if (!name) { input.focus(); return; }
+        state.identity = name;
+        state.needsWelcome = false;
+        localStorage.setItem('qqchat-identity', name);
+        document.getElementById('identity-label').textContent = name;
+        overlay.remove();
+        await registerMember(name);
+        await fetchMembers();
+      }
+
+      document.getElementById('welcome-join-btn').addEventListener('click', joinWithName);
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); joinWithName(); }
+      });
+    }
+
     async function init() {
       await fetchInfo();
       if (state.publicRead) {
         document.querySelectorAll('.panel-add-btn').forEach(function(btn) { btn.style.display = 'none'; });
+      } else if (state.needsWelcome) {
+        // Show welcome overlay, defer member registration
       } else {
         await registerMember(state.identity);
       }
@@ -2104,7 +2393,9 @@
       await fetchAgents();
       await fetchChannels();
       await fetchMessages();
+      updateChannelHeaderDesc();
       connectWS();
+      if (state.needsWelcome) showWelcomeOverlay();
     }
 
     init();
