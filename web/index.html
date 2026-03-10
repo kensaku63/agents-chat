@@ -3045,6 +3045,8 @@
       lines.push('## ' + step + '. 各ターミナルで AI を起動');
       step++;
       lines.push('');
+      lines.push('**注意**: Claude Code セッション内から実行する場合、環境変数 `CLAUDECODE` が tmux 子プロセスに引き継がれ、ネストセッション検出エラーになります。`claude` 起動時は `env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude` を使ってください。');
+      lines.push('');
       agentNames.forEach(function(name) {
         var entry = allAgents[name];
         var dir = entry.cfg.directory || '';
@@ -3052,6 +3054,8 @@
 
         var ai = entry.cfg.ai || 'claude';
         if (entry.triggerCfg) ai = entry.triggerCfg.ai || ai;
+
+        if (ai === 'claude') ai = 'env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude';
 
         var cdCmd = dir ? 'cd ' + dir + ' && ' : '';
         lines.push("tmux send-keys -t agents:" + name + " '" + cdCmd + ai + "' Enter");
