@@ -273,12 +273,17 @@ export function getUnreadMessages(
   if (opts?.mentionName) {
     if (opts.channels && opts.channels.length > 0) {
       const placeholders = opts.channels.map(() => "?").join(", ");
-      conds.push(`(channel IN (${placeholders}) OR content LIKE ?)`);
+      // Channel messages: root only (exclude thread replies). Mentions: include replies too.
+      conds.push(`((channel IN (${placeholders}) AND reply_to IS NULL) OR content LIKE ?)`);
       params.push(...opts.channels, `%@${opts.mentionName}%`);
     } else {
+      // No subscribed channels: mentions only (including thread replies)
       conds.push("content LIKE ?");
       params.push(`%@${opts.mentionName}%`);
     }
+  } else {
+    // Human reader: root messages only (thread replies are visible via thread expansion)
+    conds.push("reply_to IS NULL");
   }
 
   const where = `WHERE ${conds.join(" AND ")}`;
